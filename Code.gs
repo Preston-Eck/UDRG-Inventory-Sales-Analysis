@@ -5,17 +5,15 @@ const CONFIG = {
   spreadsheetId: "1fXTv1ia1090uWl15b3PlBOxtwfKqyHodh4xj89Dcfyg",
   sheets: {
     products: {
-      tabName: "Kampstore Sales", // Using the sales log to extract unique product details
+      tabName: "Kampstore Sales", 
       columns: {
         sku: "SKU",
-        name: "Item", // Mapped to 'Item'. Could also be 'Original Title' if preferred.
+        name: "Item", 
         department: "Department",
         category: "Category",
         vendor: "Brand/Vendor",
         cost: "Current Cost",
-        price: "Current Price",
-        // 'Lead Time' is not in the sheet, will default to 0
-        leadTimeWeeks: "Lead Time (Weeks)" 
+        price: "Current Price"
       }
     },
     transactions: {
@@ -45,6 +43,21 @@ function doGet() {
       .setTitle('UDRG Inventory & Sales Reports')
       .addMetaTag('viewport', 'width=device-width, initial-scale=1')
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+// --- HELPER: Number Parser ---
+// Handles "$10.00", "1,000", or empty strings
+function parseNum(val) {
+  if (typeof val === 'number') return val;
+  if (!val) return 0;
+  if (typeof val === 'string') {
+    // Remove currency symbols, commas, and whitespace
+    const clean = val.replace(/[^0-9.-]/g, '');
+    if (clean === '') return 0;
+    const num = parseFloat(clean);
+    return isNaN(num) ? 0 : num;
+  }
+  return 0;
 }
 
 // --- MAIN DATA FETCHING ---
@@ -78,19 +91,26 @@ function getData() {
       if (h) headerMap[h.toString().trim().toLowerCase()] = i;
     });
     
+    // Define which internal keys are numeric
+    const numericKeys = ['cost', 'price', 'qtySold', 'discount', 'qtyOnHand'];
+
     return values.map(row => {
       const obj = {};
-      // Iterate through the columns defined in CONFIG
       Object.keys(sheetConfig.columns).forEach(appKey => {
         const sheetHeader = sheetConfig.columns[appKey];
         const lookupKey = sheetHeader.toLowerCase();
         const colIndex = headerMap[lookupKey];
         
         if (colIndex !== undefined) {
-          obj[appKey] = row[colIndex];
+          const rawVal = row[colIndex];
+          if (numericKeys.includes(appKey)) {
+            obj[appKey] = parseNum(rawVal);
+          } else {
+            obj[appKey] = rawVal ? rawVal.toString() : "";
+          }
         } else {
           // Default values if column is missing
-          if (appKey === 'qtySold' || appKey === 'cost' || appKey === 'price' || appKey === 'qtyOnHand') {
+          if (numericKeys.includes(appKey)) {
              obj[appKey] = 0;
           } else {
              obj[appKey] = "";
@@ -102,25 +122,20 @@ function getData() {
   };
 
   try {
-    // 1. Get raw data
     const productsRaw = getMappedData('products');
-    const transactions = getMappedData('transactions');
+    const transactionsRaw = getMappedData('transactions');
     const inventoryRaw = getMappedData('inventory');
 
-    // 2. Deduplicate Products
-    // Since 'Kampstore Sales' has multiple rows per SKU, we need to extract unique products.
-    // We use a Map, which keeps the last occurrence found (usually most current price/cost).
+    // Deduplicate Products
     const productMap = new Map();
     productsRaw.forEach(p => {
-      // Only add if SKU exists
       if (p.sku && p.sku.toString().trim() !== "") {
          productMap.set(p.sku, p);
       }
     });
     const uniqueProducts = Array.from(productMap.values());
 
-    // 3. Deduplicate Inventory (Optional safety)
-    // If 'Inventory Count Log' has history, we take the latest entry for each SKU.
+    // Deduplicate Inventory
     const inventoryMap = new Map();
     inventoryRaw.forEach(i => {
       if (i.sku && i.sku.toString().trim() !== "") {
@@ -129,29 +144,52 @@ function getData() {
     });
     const uniqueInventory = Array.from(inventoryMap.values());
 
-    if (!uniqueProducts.length && !transactions.length) {
-       return { products: [], transactions: [], inventory: [] };
+    // Clean Transactions Dates
+    const cleanTransactions = transactionsRaw.map(t => {
+      let dateStr = new Date().toISOString().split('T')[0];
+      try {
+        if (t.date) {
+           const d = new Date(t.date);
+           if (!isNaN(d.getTime())) {
+             dateStr = d.toISOString().split('T')[0];
+           }
+        }
+      } catch (e) {}
+      return { ...t, date: dateStr };
+    });
+
+    if (uniqueProducts.length === 0) {
+       // Return debug info if no products found
+       return { 
+         products: [], 
+         transactions: [], 
+         inventory: [],
+         debug: {
+           error: "No products found.",
+           details: `Checked tab '${CONFIG.sheets.products.tabName}'. Raw rows: ${productsRaw.length}. Unique SKUs: 0.`,
+           tabsAvailable: ss.getSheets().map(s => s.getName())
+         }
+       };
     }
 
     return {
       products: uniqueProducts,
-      transactions: transactions.map(t => ({
-        ...t,
-        // Ensure date is string format YYYY-MM-DD for the frontend
-        date: t.date ? new Date(t.date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]
-      })),
+      transactions: cleanTransactions,
       inventory: uniqueInventory
     };
   } catch (e) {
     Logger.log(e);
-    throw new Error("Error fetching data: " + e.message);
+    return {
+       products: [], transactions: [], inventory: [],
+       debug: { error: "Script Exception", details: e.toString() }
+    };
   }
 }
 
 // --- AI API CALL ---
 function callGeminiAPI(prompt, modelName) {
   const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
-  if (!apiKey) throw new Error("GEMINI_API_KEY not found in Script Properties");
+  if (!apiKey) throw new Error("API Key Missing. Set 'GEMINI_API_KEY' in Script Properties.");
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
   
@@ -170,7 +208,10 @@ function callGeminiAPI(prompt, modelName) {
     const response = UrlFetchApp.fetch(url, options);
     const json = JSON.parse(response.getContentText());
     
-    if (json.error) throw new Error(json.error.message);
+    if (json.error) {
+       // Pass the actual error message back to client
+       throw new Error(`Gemini API Error: ${json.error.message} (Status: ${json.error.code})`);
+    }
     
     if (json.candidates?.[0]?.content?.parts?.[0]?.text) {
        return json.candidates[0].content.parts[0].text;
@@ -178,8 +219,7 @@ function callGeminiAPI(prompt, modelName) {
     return "No response text generated from Gemini.";
     
   } catch (e) {
-    Logger.log("Gemini Error: " + e.toString());
-    throw new Error("Failed to generate content: " + e.message);
+    throw new Error(e.message);
   }
 }
 

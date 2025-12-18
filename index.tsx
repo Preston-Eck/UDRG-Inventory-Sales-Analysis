@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createRoot } from 'react-dom/client';
 
@@ -29,7 +30,6 @@ interface Product {
   vendor: string;
   cost: number;
   price: number;
-  leadTimeWeeks: number;
 }
 
 interface Transaction {
@@ -159,16 +159,15 @@ const DEFAULT_SETTINGS: AppSettings = {
 // --- Mock Data ---
 
 const MOCK_PROPERTIES = ['Downtown Store', 'North Mall Kiosk', 'Online Store', 'Westside Warehouse'];
-const MOCK_VENDORS = ['LogiTechs', 'OfficeDepot', 'FurniCo', 'DisplayPro'];
 
 const MOCK_PRODUCTS: Product[] = [
-  { sku: 'EL001', name: 'Wireless Mouse', department: 'Peripherals', category: 'Electronics', vendor: 'LogiTechs', cost: 12, price: 29, leadTimeWeeks: 2 },
-  { sku: 'EL002', name: 'Mechanical Keyboard', department: 'Peripherals', category: 'Electronics', vendor: 'LogiTechs', cost: 45, price: 120, leadTimeWeeks: 3 },
-  { sku: 'EL003', name: 'USB-C Monitor', department: 'Displays', category: 'Electronics', vendor: 'DisplayPro', cost: 150, price: 350, leadTimeWeeks: 4 },
-  { sku: 'FU001', name: 'Ergo Office Chair', department: 'Seating', category: 'Furniture', vendor: 'FurniCo', cost: 180, price: 450, leadTimeWeeks: 6 },
-  { sku: 'FU002', name: 'Standing Desk', department: 'Desks', category: 'Furniture', vendor: 'FurniCo', cost: 250, price: 600, leadTimeWeeks: 5 },
-  { sku: 'OF001', name: 'Notebook Pack', department: 'Supplies', category: 'Office', vendor: 'OfficeDepot', cost: 5, price: 15, leadTimeWeeks: 1 },
-  { sku: 'OF002', name: 'Gel Pen Set', department: 'Supplies', category: 'Office', vendor: 'OfficeDepot', cost: 3, price: 12, leadTimeWeeks: 1 },
+  { sku: 'EL001', name: 'Wireless Mouse', department: 'Peripherals', category: 'Electronics', vendor: 'LogiTechs', cost: 12, price: 29 },
+  { sku: 'EL002', name: 'Mechanical Keyboard', department: 'Peripherals', category: 'Electronics', vendor: 'LogiTechs', cost: 45, price: 120 },
+  { sku: 'EL003', name: 'USB-C Monitor', department: 'Displays', category: 'Electronics', vendor: 'DisplayPro', cost: 150, price: 350 },
+  { sku: 'FU001', name: 'Ergo Office Chair', department: 'Seating', category: 'Furniture', vendor: 'FurniCo', cost: 180, price: 450 },
+  { sku: 'FU002', name: 'Standing Desk', department: 'Desks', category: 'Furniture', vendor: 'FurniCo', cost: 250, price: 600 },
+  { sku: 'OF001', name: 'Notebook Pack', department: 'Supplies', category: 'Office', vendor: 'OfficeDepot', cost: 5, price: 15 },
+  { sku: 'OF002', name: 'Gel Pen Set', department: 'Supplies', category: 'Office', vendor: 'OfficeDepot', cost: 3, price: 12 },
 ];
 
 const generateMockData = () => {
@@ -222,7 +221,6 @@ const Card = ({ children, className = '' }: { children?: React.ReactNode, classN
 const Button = ({ onClick, children, variant = 'primary', className = '', disabled = false }: any) => {
   const baseStyle = "px-4 py-2 rounded-md font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-[var(--sidebar-bg)] disabled:opacity-50 disabled:cursor-not-allowed";
   
-  // Use inline styles for primary to support dynamic colors
   const style = variant === 'primary' 
     ? { backgroundColor: 'var(--primary-color)', color: '#fff' } 
     : variant === 'success' ? { backgroundColor: '#10b981', color: '#fff' }
@@ -425,7 +423,7 @@ const InventoryCharts = ({ data, settings }: { data: AnalysisRow[], settings: Ap
     });
 
     return () => { if (chartInstance.current) chartInstance.current.destroy(); };
-  }, [data, settings.charts]); // Re-render when data or chart settings change
+  }, [data, settings.charts]);
 
   return <div className="h-64"><canvas ref={barChartRef} /></div>;
 };
@@ -445,7 +443,6 @@ const CalendarView = ({ rows, onCellClick, sortConfig, onSort }: {
   const activeRows = rows.filter(r => r.hasHistory);
   const inactiveRows = rows.filter(r => !r.hasHistory);
 
-  // Generate next 12 months for headers
   const months = useMemo(() => {
     const m = [];
     const d = new Date();
@@ -465,7 +462,6 @@ const CalendarView = ({ rows, onCellClick, sortConfig, onSort }: {
 
   const maxSelectedIndex = useMemo(() => {
     if (selectedMonths.size <= 1) return -1;
-    // Fix: Explicitly cast Array.from result to number[] to satisfy Math.max
     return Math.max(...(Array.from(selectedMonths) as number[]));
   }, [selectedMonths]);
 
@@ -515,7 +511,6 @@ const CalendarView = ({ rows, onCellClick, sortConfig, onSort }: {
             </tr>
           </thead>
           <tbody className="divide-y divide-[var(--border-color)] bg-[var(--app-bg)]">
-            {/* Active Items */}
             {activeRows.map(row => (
               <tr key={row.id} className="hover:bg-[var(--card-bg)] transition-colors">
                 <td className="px-4 py-3 font-medium text-[var(--text-color)] border-r border-[var(--card-bg)] bg-[var(--app-bg)] sticky left-0 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.5)]">
@@ -564,7 +559,6 @@ const CalendarView = ({ rows, onCellClick, sortConfig, onSort }: {
               </tr>
             ))}
             
-            {/* Inactive Items Section */}
             {inactiveRows.length > 0 && (
               <>
                 <tr className="bg-[var(--sidebar-bg)] border-y border-[var(--border-color)] cursor-pointer hover:bg-[var(--app-bg)] transition-colors" onClick={() => setIsInactiveCollapsed(!isInactiveCollapsed)}>
@@ -598,7 +592,6 @@ const CalendarView = ({ rows, onCellClick, sortConfig, onSort }: {
         </table>
       </div>
       
-      {/* Footer Totals */}
       {selectionTotals && (
         <div className="bg-[var(--sidebar-bg)] border-t border-[var(--border-color)] p-4 flex justify-between items-center text-sm sticky bottom-0 z-30 shadow-[0_-5px_15px_rgba(0,0,0,0.3)]">
            <div className="text-[var(--text-muted)]">
@@ -631,7 +624,6 @@ const CellDetailModal = ({ row, cell, onClose, onAiExplain, isThinking }: { row:
         </div>
         
         <div className="p-6 overflow-y-auto space-y-6">
-           {/* Decision Summary */}
            <div className="bg-[var(--app-bg)] p-4 rounded-lg border border-[var(--border-color)] flex justify-between items-center">
               <div>
                 <p className="text-xs text-[var(--text-muted)] uppercase">Recommended Buy</p>
@@ -643,7 +635,6 @@ const CellDetailModal = ({ row, cell, onClose, onAiExplain, isThinking }: { row:
               </div>
            </div>
 
-           {/* The Math */}
            <div>
              <h4 className="text-sm font-semibold text-[var(--text-color)] mb-3 flex items-center gap-2">
                <i className="fa-solid fa-calculator text-blue-400"></i> Logic Breakdown
@@ -668,7 +659,6 @@ const CellDetailModal = ({ row, cell, onClose, onAiExplain, isThinking }: { row:
              </div>
            </div>
 
-           {/* Historical Context */}
            <div className="bg-[var(--card-bg)] p-3 rounded border border-[var(--border-color)]">
               <p className="text-xs text-[var(--text-muted)] mb-1">Historical Context</p>
               <div className="flex justify-between items-center">
@@ -693,7 +683,6 @@ const CellDetailModal = ({ row, cell, onClose, onAiExplain, isThinking }: { row:
 // --- Main Application ---
 
 const App = () => {
-  // State
   const [view, setView] = useState<'dashboard' | 'calendar'>('dashboard');
   const [products, setProducts] = useState<Product[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -701,20 +690,17 @@ const App = () => {
   const [customGroups, setCustomGroups] = useState<CustomGroup[]>([]);
   const [loading, setLoading] = useState(false);
   const [model, setModel] = useState('gemini-3-flash-preview');
+  const [debugInfo, setDebugInfo] = useState<any>(null);
   
-  // Settings State
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   
-  // Selection
   const [selectedSkus, setSelectedSkus] = useState<Set<string>>(new Set());
   const [newGroupName, setNewGroupName] = useState('');
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
 
-  // Detail Modal State
   const [detailModal, setDetailModal] = useState<{row: AnalysisRow, cell: CellLogic} | null>(null);
 
-  // Filters
   const [filters, setFilters] = useState<FilterState>({
     search: '',
     categories: [],
@@ -729,16 +715,13 @@ const App = () => {
     showColumns: { sold: true, revenue: true, profit: false, onHand: true, demand: true, reorder: true }
   });
 
-  // Chat
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([{ role: 'model', text: 'How can I help with your inventory planning today?', timestamp: new Date() }]);
   const [inputMessage, setInputMessage] = useState('');
   const [isThinking, setIsThinking] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // Init and Data Loading
   useEffect(() => {
-    // Determine 90-day window
     const today = new Date();
     const ninetyDaysAgo = new Date();
     ninetyDaysAgo.setDate(today.getDate() - 90);
@@ -753,26 +736,28 @@ const App = () => {
 
   const loadServerData = () => {
     setLoading(true);
-    // Check if running inside Google Apps Script iframe
+    setDebugInfo(null);
     if (window.google && window.google.script) {
         window.google.script.run
             .withSuccessHandler((data: any) => {
-                // Expecting backend to return object { products, transactions, inventory }
-                if (data && data.products) {
+                if (data && data.products && data.products.length > 0) {
                     setProducts(data.products);
                     setTransactions(data.transactions || []);
                     setInventory(data.inventory || []);
+                } else if (data && data.debug) {
+                    // Handle server-side debug/error reporting for missing data
+                    setDebugInfo(data.debug);
+                    setProducts([]);
                 }
                 setLoading(false);
             })
             .withFailureHandler((error: any) => {
                 console.error('GAS Error:', error);
-                setMessages(prev => [...prev, { role: 'model', text: "Error loading live data from Google Sheets.", timestamp: new Date(), isError: true }]);
+                setDebugInfo({ error: error.message, details: "Failed to connect to backend." });
                 setLoading(false);
             })
-            .getData(); // Call the backend function named 'getData'
+            .getData();
     } else {
-        // Fallback for local dev / preview
         console.log("No GAS environment detected. Using mock data.");
         const mock = generateMockData();
         setProducts(mock.products);
@@ -782,11 +767,10 @@ const App = () => {
     }
   };
 
-  // Derive unique properties, departments, vendors
   const { availableProperties, availableDepartments, availableVendors } = useMemo(() => {
     const props = new Set(transactions.map(t => t.property).filter(Boolean));
-    const depts = new Set(products.map(p => p.department));
-    const vendors = new Set(products.map(p => p.vendor));
+    const depts = new Set(products.map(p => p.department).filter(Boolean));
+    const vendors = new Set(products.map(p => p.vendor).filter(Boolean));
     return {
        availableProperties: Array.from(props).sort(),
        availableDepartments: Array.from(depts).sort(),
@@ -794,19 +778,14 @@ const App = () => {
     };
   }, [transactions, products]);
 
-  // Aggregation & Forecast Logic
   const analyzedData: AnalysisRow[] = useMemo(() => {
     if (products.length === 0) return [];
     
-    // 1. Property Filter
     const propertyFilteredTx = transactions.filter(t => 
        filters.selectedProperty === 'All' || t.property === filters.selectedProperty
     );
 
-    // 2. Date Filter
     const filteredTx = propertyFilteredTx.filter(t => t.date >= filters.dateStart && t.date <= filters.dateEnd);
-    
-    // 3. Historical Data for Forecasting (All time, property filtered)
     const allTx = propertyFilteredTx;
 
     const calculateMetrics = (skus: string[], id: string, name: string, category: string, isGroup: boolean): AnalysisRow => {
@@ -849,17 +828,15 @@ const App = () => {
         qtyOnHand += inv ? inv.qtyOnHand : 0;
       });
 
-      const productCost = totalCost / skus.length;
+      const productCost = totalCost / (skus.length || 1);
       const departmentLabel = Array.from(departments).join(', ');
       const vendorLabel = Array.from(vendors).join(', ');
 
-      // --- Forecast Schedule Logic ---
       const calendarSchedule: CellLogic[] = [];
       let simulatedStock = qtyOnHand;
       const today = new Date();
       let hasHistory = false;
 
-      // Look forward 12 months
       for (let i = 1; i <= 12; i++) {
          const targetDate = new Date(today.getFullYear(), today.getMonth() + i, 1);
          const targetMonth = targetDate.getMonth();
@@ -916,7 +893,6 @@ const App = () => {
          });
       }
 
-      // Check for history in current period too (edge case: new product just launched)
       if (qtySold > 0) hasHistory = true;
 
       const d1 = new Date(filters.dateStart);
@@ -947,27 +923,20 @@ const App = () => {
       rows = [...rows, ...ungroupedProducts.map(p => calculateMetrics([p.sku], p.sku, p.name, p.category, false))];
     }
 
-    // Apply Filters
     let result = rows.filter(r => {
       const matchSearch = r.name.toLowerCase().includes(filters.search.toLowerCase());
       const matchCat = filters.categories.length === 0 || filters.categories.includes(r.category);
-      // For groups, department/vendor checks if ANY item matches
       const matchDept = filters.departments.length === 0 || filters.departments.some(d => r.department.includes(d));
       const matchVendor = filters.vendors.length === 0 || filters.vendors.some(v => r.vendor.includes(v));
       return matchSearch && matchCat && matchDept && matchVendor;
     });
 
-    // Apply Sorting
     result.sort((a, b) => {
        const field = filters.sortBy;
        const dir = filters.sortDir === 'asc' ? 1 : -1;
-       
        let valA = a[field as keyof AnalysisRow];
        let valB = b[field as keyof AnalysisRow];
-
-       if (typeof valA === 'string' && typeof valB === 'string') {
-          return valA.localeCompare(valB) * dir;
-       }
+       if (typeof valA === 'string' && typeof valB === 'string') return valA.localeCompare(valB) * dir;
        // @ts-ignore
        return (valA - valB) * dir;
     });
@@ -975,7 +944,6 @@ const App = () => {
     return result;
   }, [products, transactions, inventory, customGroups, filters]);
 
-  // Sorting Handler
   const handleSort = (field: string) => {
      setFilters(prev => ({
        ...prev,
@@ -984,7 +952,6 @@ const App = () => {
      }));
   };
 
-  // AI
   const handleSendMessage = async (customPrompt?: string) => {
     const text = (typeof customPrompt === 'string' ? customPrompt : inputMessage);
     if (!text || !text.trim()) return;
@@ -1019,15 +986,17 @@ const App = () => {
            setIsThinking(false);
         })
         .withFailureHandler((error: any) => {
-           console.error(error);
-           setMessages(prev => [...prev, { role: 'model', text: "Error: " + error.message, timestamp: new Date(), isError: true }]);
+           let errorMsg = "Error: " + error.message;
+           if (errorMsg.includes("API Key Missing") || errorMsg.includes("API key not valid")) {
+               errorMsg = "⚠️ Configuration Error: The Gemini API Key is missing or invalid. Please check the Apps Script 'Script Properties'.";
+           }
+           setMessages(prev => [...prev, { role: 'model', text: errorMsg, timestamp: new Date(), isError: true }]);
            setIsThinking(false);
         })
         .callGeminiAPI(finalPrompt, model);
     } else {
-       // Mock fallback for local dev
        setTimeout(() => {
-         setMessages(prev => [...prev, { role: 'model', text: "[Local Dev] This would be a Gemini response. (Connect to Google Apps Script for live AI)", timestamp: new Date() }]);
+         setMessages(prev => [...prev, { role: 'model', text: "[Local Dev] This would be a Gemini response.", timestamp: new Date() }]);
          setIsThinking(false);
        }, 1000);
     }
@@ -1064,11 +1033,10 @@ const App = () => {
         }
       `}</style>
       
-      {/* Sidebar Navigation */}
       <aside className="w-full md:w-64 bg-[var(--sidebar-bg)] border-r border-[var(--border-color)] flex flex-col h-screen flex-shrink-0 z-20 transition-colors">
         <div className="p-4">
            <h1 className="text-xl font-bold text-[var(--primary-color)] flex items-center gap-2">
-             <i className="fa-solid fa-boxes-stacked"></i> UDRG Inventory & Sales Reports
+             <i className="fa-solid fa-boxes-stacked"></i> UDRG Reports
            </h1>
         </div>
 
@@ -1085,10 +1053,10 @@ const App = () => {
           <div className="bg-[var(--app-bg)] p-3 rounded border border-[var(--border-color)]">
              <div className="flex justify-between items-center mb-2">
                 <label className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">Data Sync</label>
-                <div className={`w-2 h-2 rounded-full ${loading ? 'bg-amber-500 animate-pulse' : 'bg-green-500'}`}></div>
+                <div className={`w-2 h-2 rounded-full ${loading ? 'bg-amber-500 animate-pulse' : debugInfo ? 'bg-red-500' : 'bg-green-500'}`}></div>
              </div>
              <p className="text-[10px] text-[var(--text-muted)] mb-2">
-               {loading ? 'Fetching live data...' : 'Data synchronized.'}
+               {loading ? 'Fetching live data...' : debugInfo ? 'Error loading data' : 'Data synchronized.'}
              </p>
              <button onClick={loadServerData} className="w-full bg-[var(--card-bg)] hover:bg-[var(--border-color)] text-xs py-1.5 rounded border border-[var(--border-color)] transition-colors text-[var(--text-color)]">
                <i className="fa-solid fa-sync mr-1"></i> Refresh Data
@@ -1109,7 +1077,6 @@ const App = () => {
              </select>
           </div>
           
-          {/* Search */}
           <div>
             <label className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2 block">Search</label>
             <input 
@@ -1121,10 +1088,10 @@ const App = () => {
             />
           </div>
 
-          {/* Department Filter */}
           <div>
             <label className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2 block">Department</label>
             <div className="flex flex-wrap gap-1 max-h-32 overflow-y-auto bg-[var(--app-bg)] p-2 rounded border border-[var(--border-color)]">
+               {availableDepartments.length === 0 && <span className="text-[10px] text-[var(--text-muted)] italic">No departments found</span>}
                {availableDepartments.map(dept => (
                   <button 
                      key={dept} 
@@ -1142,10 +1109,10 @@ const App = () => {
             </div>
           </div>
           
-          {/* Vendor Filter */}
           <div>
             <label className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2 block">Vendor / Brand</label>
             <div className="flex flex-wrap gap-1 max-h-32 overflow-y-auto bg-[var(--app-bg)] p-2 rounded border border-[var(--border-color)]">
+               {availableVendors.length === 0 && <span className="text-[10px] text-[var(--text-muted)] italic">No vendors found</span>}
                {availableVendors.map(v => (
                   <button 
                      key={v} 
@@ -1195,10 +1162,7 @@ const App = () => {
         </div>
       </aside>
 
-      {/* Main Content Area */}
       <main className="flex-1 overflow-hidden flex flex-col relative h-screen">
-        
-        {/* Header */}
         <header className="bg-[var(--sidebar-bg)] border-b border-[var(--border-color)] p-6 flex-shrink-0 transition-colors">
            <div className="flex justify-between items-center">
              <div>
@@ -1213,12 +1177,36 @@ const App = () => {
            </div>
         </header>
 
-        {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          {debugInfo && (
+            <Card className="bg-red-900/20 border-red-500/50">
+               <div className="flex items-start gap-4">
+                 <i className="fa-solid fa-circle-exclamation text-red-400 text-xl mt-1"></i>
+                 <div>
+                    <h3 className="text-lg font-bold text-red-200">Data Connection Issue</h3>
+                    <p className="text-red-300 text-sm mb-2">{debugInfo.error || "Backend returned no data."}</p>
+                    {debugInfo.details && (
+                       <pre className="text-xs bg-black/30 p-2 rounded text-red-200/80 overflow-x-auto">
+                          {debugInfo.details}
+                       </pre>
+                    )}
+                    {debugInfo.tabsAvailable && (
+                       <p className="text-xs text-red-400 mt-2">Available Tabs in Sheet: {debugInfo.tabsAvailable.join(', ')}</p>
+                    )}
+                 </div>
+               </div>
+            </Card>
+          )}
+
+          {!debugInfo && products.length === 0 && !loading && (
+             <div className="flex flex-col items-center justify-center h-64 text-[var(--text-muted)]">
+                <i className="fa-solid fa-clipboard-list text-4xl mb-4 opacity-50"></i>
+                <p>No inventory items found. Please check date filters or source sheet.</p>
+             </div>
+          )}
           
-          {view === 'dashboard' ? (
+          {!debugInfo && products.length > 0 && view === 'dashboard' ? (
             <>
-              {/* KPI Cards */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                   <Card className="bg-[var(--card-bg)]">
                     <span className="text-[var(--text-muted)] text-xs uppercase">Net Revenue</span>
@@ -1238,12 +1226,10 @@ const App = () => {
                   </Card>
               </div>
 
-              {/* Chart */}
               <Card className="p-4">
                 <InventoryCharts data={analyzedData} settings={settings} />
               </Card>
 
-              {/* Table */}
               <Card className="p-0 overflow-hidden border-0 shadow-lg">
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-[var(--text-muted)]">
@@ -1370,8 +1356,7 @@ const App = () => {
                 </div>
               </Card>
             </>
-          ) : (
-            // CALENDAR VIEW
+          ) : !debugInfo && products.length > 0 && (
             <Card className="p-0 border-0 shadow-xl overflow-hidden bg-[var(--app-bg)] h-full flex flex-col relative">
                <CalendarView 
                  rows={analyzedData} 
@@ -1388,14 +1373,12 @@ const App = () => {
         </div>
       </main>
 
-      {/* Floating Chat */}
       {!isChatOpen && (
         <button onClick={() => setIsChatOpen(true)} className="fixed bottom-6 right-6 bg-[var(--primary-color)] text-white rounded-full p-4 shadow-xl z-50 transition-transform hover:scale-105">
           <i className="fa-solid fa-robot text-xl"></i>
         </button>
       )}
 
-      {/* Chat Drawer */}
       <div className={`fixed inset-y-0 right-0 w-96 bg-[var(--card-bg)] border-l border-[var(--border-color)] shadow-2xl transform transition-transform duration-300 z-50 flex flex-col ${isChatOpen ? 'translate-x-0' : 'translate-x-full'}`}>
          <div className="p-4 border-b border-[var(--border-color)] flex justify-between items-center bg-[var(--sidebar-bg)]">
             <h3 className="font-bold text-[var(--text-color)] flex items-center gap-2"><i className="fa-solid fa-sparkles text-[var(--primary-color)]"></i> Gemini Expert</h3>
@@ -1404,7 +1387,7 @@ const App = () => {
          <div className="flex-1 overflow-y-auto p-4 space-y-4">
             {messages.map((msg, i) => (
               <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                 <div className={`max-w-[85%] rounded-lg p-3 text-sm whitespace-pre-wrap shadow-sm ${msg.role === 'user' ? 'bg-[var(--primary-color)] text-white' : 'bg-[var(--app-bg)] text-[var(--text-color)] border border-[var(--border-color)]'}`}>
+                 <div className={`max-w-[85%] rounded-lg p-3 text-sm whitespace-pre-wrap shadow-sm ${msg.role === 'user' ? 'bg-[var(--primary-color)] text-white' : msg.isError ? 'bg-red-900/50 text-red-200 border border-red-500' : 'bg-[var(--app-bg)] text-[var(--text-color)] border border-[var(--border-color)]'}`}>
                     {msg.text}
                  </div>
               </div>
@@ -1418,7 +1401,6 @@ const App = () => {
          </div>
       </div>
 
-      {/* Modals */}
       {isGroupModalOpen && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60]">
            <div className="bg-[var(--card-bg)] rounded-lg p-6 w-96 border border-[var(--border-color)] shadow-xl text-[var(--text-color)]">
@@ -1433,7 +1415,6 @@ const App = () => {
         </div>
       )}
 
-      {/* Settings Modal */}
       {isSettingsOpen && (
         <SettingsModal 
           settings={settings} 
@@ -1442,7 +1423,6 @@ const App = () => {
         />
       )}
 
-      {/* Cell Detail Modal */}
       {detailModal && (
         <CellDetailModal 
            row={detailModal.row} 

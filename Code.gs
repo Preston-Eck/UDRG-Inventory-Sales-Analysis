@@ -8,7 +8,7 @@ function doGet() {
 }
 
 function getData() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = SpreadsheetApp.openById("1fXTv1ia1090uWl15b3PlBOxtwfKqyHodh4xj89Dcfyg");
   
   // Helper to get data from a sheet
   const getSheetData = (sheetName) => {
@@ -53,5 +53,47 @@ function getData() {
   } catch (e) {
     Logger.log(e);
     throw new Error("Failed to fetch data from Spreadsheet. Ensure sheets 'Products', 'Transactions', and 'Inventory' exist.");
+  }
+}
+
+function callGeminiAPI(prompt, modelName) {
+  const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+  if (!apiKey) throw new Error("GEMINI_API_KEY not found in Script Properties");
+
+  // Construct URL for Gemini API (v1beta)
+  // modelName example: 'gemini-3-flash-preview'
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+  
+  const payload = {
+    contents: [{
+      parts: [{ text: prompt }]
+    }]
+  };
+
+  const options = {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  };
+
+  try {
+    const response = UrlFetchApp.fetch(url, options);
+    const json = JSON.parse(response.getContentText());
+    
+    if (json.error) {
+      throw new Error(json.error.message);
+    }
+    
+    // Extract text specifically for the frontend's expected format
+    if (json.candidates && json.candidates.length > 0 && json.candidates[0].content && json.candidates[0].content.parts.length > 0) {
+       return json.candidates[0].content.parts[0].text;
+    }
+    
+    return "No response text generated from Gemini.";
+    
+  } catch (e) {
+    Logger.log("Gemini Error: " + e.toString());
+    throw new Error("Failed to generate content: " + e.message);
   }
 }

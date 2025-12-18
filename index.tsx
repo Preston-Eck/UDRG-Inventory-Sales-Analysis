@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createRoot } from 'react-dom/client';
-import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 
 // --- Types ---
 
@@ -10,9 +9,10 @@ declare global {
     google?: {
       script: {
         run: {
-          withSuccessHandler: (callback: (data: any) => void) => {
-             withFailureHandler: (callback: (error: any) => void) => {
+          withSuccessHandler: (callback: (data: any, userObject?: any) => void) => {
+             withFailureHandler: (callback: (error: Error, userObject?: any) => void) => {
                 getData: () => void;
+                callGeminiAPI: (prompt: string, model: string) => void;
              }
           }
         }
@@ -994,12 +994,10 @@ const App = () => {
     if (!customPrompt) setInputMessage('');
     setIsThinking(true);
 
-    try {
-      const ai = new GoogleGenAI({ apiKey: (process.env.API_KEY as string) });
-      let prompt: string = '';
-      if (detailModal && text.includes("EXPLAIN_CELL")) {
+    let finalPrompt = text;
+    if (detailModal && text.includes("EXPLAIN_CELL")) {
          const dm = detailModal;
-         prompt = `
+         finalPrompt = `
            You are an inventory expert. Explain why the system recommends buying ${dm.cell.restockQty} units of "${dm.row.name}" for ${dm.cell.monthLabel}.
            DATA CONTEXT:
            - Projected Opening Stock: ${dm.cell.openingStock}
@@ -1009,31 +1007,29 @@ const App = () => {
            The formula used is: Buy = (Forecast + Target Stock) - Opening Stock.
            Explain this simply to a store manager. Mention if the purchase is driven by high seasonal demand or simply maintaining safety stock.
          `;
-      } else {
+    } else {
          const contextDescription = view === 'calendar' ? "USER IS VIEWING RE-STOCK CALENDAR" : "USER IS VIEWING DASHBOARD";
-         prompt = `User Question: "${text}". Context: ${contextDescription}. Answer as an inventory expert.`;
-      }
+         finalPrompt = `User Question: "${text}". Context: ${contextDescription}. Answer as an inventory expert.`;
+    }
 
-      let responseText = '';
-      if (model === 'gemini-3-pro-preview') {
-         const response: GenerateContentResponse = await ai.models.generateContent({
-           model: 'gemini-3-pro-preview',
-           contents: prompt,
-           config: { thinkingConfig: { thinkingBudget: 2048 } }
-         });
-         responseText = response.text || "No response generated.";
-      } else {
-        const response: GenerateContentResponse = await ai.models.generateContent({
-           model: 'gemini-3-flash-preview',
-           contents: prompt
-        });
-        responseText = response.text || "No response generated.";
-      }
-      setMessages(prev => [...prev, { role: 'model', text: responseText, timestamp: new Date() }]);
-    } catch (e) {
-      setMessages(prev => [...prev, { role: 'model', text: "Error connecting to AI.", timestamp: new Date(), isError: true }]);
-    } finally {
-      setIsThinking(false);
+    if (window.google && window.google.script) {
+      window.google.script.run
+        .withSuccessHandler((responseText: string) => {
+           setMessages(prev => [...prev, { role: 'model', text: responseText, timestamp: new Date() }]);
+           setIsThinking(false);
+        })
+        .withFailureHandler((error: any) => {
+           console.error(error);
+           setMessages(prev => [...prev, { role: 'model', text: "Error: " + error.message, timestamp: new Date(), isError: true }]);
+           setIsThinking(false);
+        })
+        .callGeminiAPI(finalPrompt, model);
+    } else {
+       // Mock fallback for local dev
+       setTimeout(() => {
+         setMessages(prev => [...prev, { role: 'model', text: "[Local Dev] This would be a Gemini response. (Connect to Google Apps Script for live AI)", timestamp: new Date() }]);
+         setIsThinking(false);
+       }, 1000);
     }
   };
 

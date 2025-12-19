@@ -83,7 +83,7 @@ interface AnalysisRow {
 
 interface FilterState {
   search: string;
-  searchFields: string[]; // Added for column selection
+  searchFields: string[];
   categories: string[];
   departments: string[];
   vendors: string[];
@@ -163,11 +163,9 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 const db = getDatabase(app);
 
 // --- Helpers ---
-
-// Robust parser to prevent NaN issues
 const safeParseFloat = (val: any) => {
   if (val === undefined || val === null || val === '') return 0;
-  const str = String(val).replace(/[^0-9.-]+/g, ''); // Remove currency symbols, commas, etc
+  const str = String(val).replace(/[^0-9.-]+/g, ''); 
   const num = parseFloat(str);
   return isNaN(num) ? 0 : num;
 };
@@ -217,7 +215,6 @@ const HeaderWithInfo = ({ label, infoQuery, onExplain, className = '', align = '
 );
 
 // --- Settings Modal ---
-
 const SettingsModal = ({ settings, onSave, onClose }: { settings: AppSettings, onSave: (s: AppSettings) => void, onClose: () => void }) => {
   const [localSettings, setLocalSettings] = useState(settings);
 
@@ -284,20 +281,6 @@ const SettingsModal = ({ settings, onSave, onClose }: { settings: AppSettings, o
                 </div>
              </div>
            </section>
-
-           <section>
-             <h4 className="text-xs uppercase font-bold text-slate-500 mb-4 border-b border-[var(--border-color)] pb-1">Dashboard Chart</h4>
-             <div className="space-y-3">
-               <div className="flex items-center justify-between">
-                 <div className="flex items-center gap-2">
-                   <input type="checkbox" checked={localSettings.charts.showNetRevenue} onChange={e => updateChartVisibility('showNetRevenue', e.target.checked)} className="rounded border-slate-600 bg-[var(--app-bg)]"/>
-                   <span>Show Net Revenue</span>
-                 </div>
-                 <input type="color" value={localSettings.charts.colorNetRevenue} onChange={e => updateColor('charts', 'colorNetRevenue', e.target.value)} className="h-6 w-10 bg-transparent rounded cursor-pointer" />
-               </div>
-               {/* Add other chart controls here if needed */}
-             </div>
-           </section>
         </div>
 
         <div className="p-4 border-t border-[var(--border-color)] bg-[var(--sidebar-bg)] rounded-b-lg flex justify-end gap-2">
@@ -310,7 +293,6 @@ const SettingsModal = ({ settings, onSave, onClose }: { settings: AppSettings, o
 };
 
 // --- Chart Component ---
-
 const InventoryCharts = ({ data, settings }: { data: AnalysisRow[], settings: AppSettings }) => {
   const barChartRef = useRef<HTMLCanvasElement>(null);
   const chartInstance = useRef<any>(null);
@@ -333,7 +315,22 @@ const InventoryCharts = ({ data, settings }: { data: AnalysisRow[], settings: Ap
           yAxisID: 'y',
        });
     }
-    // Add other datasets based on settings
+    if (settings.charts.showGrossRevenue) {
+       datasets.push({
+          label: 'Gross Revenue ($)',
+          data: sorted.map(d => d.grossRevenue),
+          backgroundColor: settings.charts.colorGrossRevenue,
+          yAxisID: 'y',
+       });
+    }
+    if (settings.charts.showProfit) {
+       datasets.push({
+          label: 'Profit ($)',
+          data: sorted.map(d => d.profit),
+          backgroundColor: settings.charts.colorProfit,
+          yAxisID: 'y',
+       });
+    }
 
     // @ts-ignore
     chartInstance.current = new Chart(barChartRef.current, {
@@ -365,17 +362,26 @@ const InventoryCharts = ({ data, settings }: { data: AnalysisRow[], settings: Ap
 
 // --- Calendar View Component ---
 
-const CalendarView = ({ rows, onCellClick, sortConfig, onSort }: { 
+const CalendarView = ({ rows, onCellClick, sortConfig, onSort, onRunForecast, isForecasting }: { 
   rows: AnalysisRow[], 
   onCellClick: (row: AnalysisRow, cell: CellLogic) => void,
   sortConfig: { sortBy: string, sortDir: string },
-  onSort: (key: string) => void
+  onSort: (key: string) => void,
+  onRunForecast: () => void,
+  isForecasting: boolean
 }) => {
   const [selectedMonths, setSelectedMonths] = useState<Set<number>>(new Set());
   const [isInactiveCollapsed, setIsInactiveCollapsed] = useState(true);
 
-  const activeRows = rows.filter(r => r.hasHistory);
-  const inactiveRows = rows.filter(r => !r.hasHistory);
+  // Pagination for Calendar
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 30;
+
+  const activeRows = rows.filter(r => r.calendarSchedule.length > 0);
+  const inactiveRows = rows.filter(r => r.calendarSchedule.length === 0);
+
+  const paginatedActiveRows = activeRows.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+  const totalPages = Math.ceil(activeRows.length / itemsPerPage);
 
   const months = useMemo(() => {
     const m = [];
@@ -416,6 +422,18 @@ const CalendarView = ({ rows, onCellClick, sortConfig, onSort }: {
 
   return (
     <div className="flex flex-col h-full">
+       
+       {/* Forecast Trigger Banner */}
+       {activeRows.length === 0 && inactiveRows.length > 0 && (
+          <div className="bg-blue-900/30 border-b border-blue-500/30 p-4 text-center">
+             <h3 className="text-blue-200 font-bold mb-1">Forecast Ready</h3>
+             <p className="text-blue-300 text-sm mb-3">Click to generate a 12-month restock plan for the {inactiveRows.length} filtered items below.</p>
+             <Button onClick={onRunForecast} disabled={isForecasting}>
+                {isForecasting ? <><i className="fa-solid fa-spinner fa-spin mr-2"></i> Calculating...</> : <><i className="fa-solid fa-wand-magic-sparkles mr-2"></i> Generate Forecast</>}
+             </Button>
+          </div>
+       )}
+
        <div className="overflow-auto pb-12 flex-1">
         <table className="w-full text-left text-[var(--text-muted)] border-collapse">
           <thead className="bg-[var(--sidebar-bg)] text-[var(--text-color)] uppercase font-bold text-xs sticky top-0 z-10 shadow-lg">
@@ -445,7 +463,7 @@ const CalendarView = ({ rows, onCellClick, sortConfig, onSort }: {
             </tr>
           </thead>
           <tbody className="divide-y divide-[var(--border-color)] bg-[var(--app-bg)]">
-            {activeRows.map(row => (
+            {paginatedActiveRows.map(row => (
               <tr key={row.id} className="hover:bg-[var(--card-bg)] transition-colors">
                 <td className="px-4 py-3 font-medium text-[var(--text-color)] border-r border-[var(--card-bg)] bg-[var(--app-bg)] sticky left-0 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.5)]">
                   <div className="flex flex-col gap-1">
@@ -492,21 +510,55 @@ const CalendarView = ({ rows, onCellClick, sortConfig, onSort }: {
                 </td>
               </tr>
             ))}
+            
+            {inactiveRows.length > 0 && (
+              <>
+                <tr className="bg-[var(--sidebar-bg)] border-y border-[var(--border-color)] cursor-pointer hover:bg-[var(--app-bg)] transition-colors" onClick={() => setIsInactiveCollapsed(!isInactiveCollapsed)}>
+                   <td colSpan={100} className="px-4 py-3 text-center text-xs font-bold text-slate-500 uppercase tracking-widest sticky left-0 z-10">
+                      <div className="flex items-center justify-center gap-2">
+                        <i className={`fa-solid fa-chevron-${isInactiveCollapsed ? 'right' : 'down'}`}></i>
+                        Items Pending Forecast / No Sales ({inactiveRows.length})
+                      </div>
+                   </td>
+                </tr>
+                {!isInactiveCollapsed && inactiveRows.map(row => (
+                  <tr key={row.id} className="bg-[var(--app-bg)] opacity-60">
+                     <td className="px-4 py-3 font-medium text-[var(--text-muted)] border-r border-[var(--border-color)] bg-[var(--app-bg)] sticky left-0 z-10">
+                        <div className="flex flex-col gap-1">
+                           <span className="text-sm">{row.name}</span>
+                           <div className="flex flex-wrap gap-2 text-[10px] text-slate-500">
+                             <span className="border border-[var(--border-color)] px-1 rounded">{row.department}</span>
+                             <span className="border border-[var(--border-color)] px-1 rounded">{row.vendor}</span>
+                           </div>
+                        </div>
+                     </td>
+                     <td colSpan={months.length + (maxSelectedIndex > -1 ? months.length : 0) + 1} className="px-4 py-3 text-center text-xs italic text-[var(--text-muted)] bg-[var(--card-bg)]">
+                        Click "Generate Forecast" to see projections.
+                     </td>
+                     <td className="sticky right-0 bg-[var(--app-bg)] border-l-2 border-[var(--border-color)]"></td>
+                  </tr>
+                ))}
+              </>
+            )}
           </tbody>
         </table>
       </div>
       
-      {selectionTotals && (
-        <div className="bg-[var(--sidebar-bg)] border-t border-[var(--border-color)] p-4 flex justify-between items-center text-sm sticky bottom-0 z-30 shadow-[0_-5px_15px_rgba(0,0,0,0.3)]">
-           <div className="text-[var(--text-muted)]">
+      {/* Calendar Pagination Controls */}
+      <div className="bg-[var(--sidebar-bg)] border-t border-[var(--border-color)] p-4 flex justify-between items-center text-sm sticky bottom-0 z-30 shadow-[0_-5px_15px_rgba(0,0,0,0.3)]">
+         <div className="flex items-center gap-4">
+             <Button variant="secondary" onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}>Previous</Button>
+             <span className="text-[var(--text-muted)]">Page {currentPage} of {totalPages || 1}</span>
+             <Button variant="secondary" onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}>Next</Button>
+         </div>
+         <div className="text-[var(--text-muted)]">
              Selected: <span className="text-[var(--text-color)] font-bold">{selectedMonths.size}</span> months
-           </div>
-           <div className="flex gap-8">
-             <div><span className="block text-[10px] uppercase text-[var(--text-muted)]">Selected Qty</span><span className="text-lg font-bold text-blue-400">{selectionTotals.totalQty.toLocaleString()}</span></div>
-             <div><span className="block text-[10px] uppercase text-[var(--text-muted)]">Selected Cost</span><span className="text-lg font-bold text-emerald-400">${selectionTotals.totalCost.toLocaleString()}</span></div>
-           </div>
-        </div>
-      )}
+         </div>
+         <div className="flex gap-8">
+             <div><span className="block text-[10px] uppercase text-[var(--text-muted)]">Selected Qty</span><span className="text-lg font-bold text-blue-400">{selectionTotals ? selectionTotals.totalQty.toLocaleString() : 0}</span></div>
+             <div><span className="block text-[10px] uppercase text-[var(--text-muted)]">Selected Cost</span><span className="text-lg font-bold text-emerald-400">${selectionTotals ? selectionTotals.totalCost.toLocaleString() : 0}</span></div>
+         </div>
+      </div>
     </div>
   );
 };
@@ -605,7 +657,10 @@ const App = () => {
 
   const [detailModal, setDetailModal] = useState<{row: AnalysisRow, cell: CellLogic} | null>(null);
 
-  const [filters, setFilters] = useState<FilterState>({
+  // --- DRAFT vs APPLIED Filters ---
+  // appliedFilters is what the app actually uses to filter data.
+  // draftFilters is what the inputs update.
+  const [appliedFilters, setAppliedFilters] = useState<FilterState>({
     search: '',
     searchFields: ['name'],
     categories: [],
@@ -620,52 +675,70 @@ const App = () => {
     showColumns: { sold: true, revenue: true, profit: false, onHand: true, demand: true, reorder: true }
   });
 
+  const [draftFilters, setDraftFilters] = useState<FilterState>(appliedFilters);
+
+  // --- Forecast State ---
+  const [forecastData, setForecastData] = useState<AnalysisRow[]>([]);
+  const [isForecasting, setIsForecasting] = useState(false);
+
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([{ role: 'model', text: 'How can I help with your inventory planning today?', timestamp: new Date() }]);
   const [inputMessage, setInputMessage] = useState('');
   const [isThinking, setIsThinking] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
+  // Pagination for Dashboard Table
+  const [dashboardPage, setDashboardPage] = useState(1);
+  const dashboardItemsPerPage = 50;
+
   useEffect(() => {
     const today = new Date();
     const ninetyDaysAgo = new Date();
     ninetyDaysAgo.setDate(today.getDate() - 90);
-    setFilters(prev => ({
-      ...prev,
-      dateStart: ninetyDaysAgo.toISOString().split('T')[0],
-      dateEnd: today.toISOString().split('T')[0]
-    }));
+    const start = ninetyDaysAgo.toISOString().split('T')[0];
+    const end = today.toISOString().split('T')[0];
+    
+    setAppliedFilters(prev => ({ ...prev, dateStart: start, dateEnd: end }));
+    setDraftFilters(prev => ({ ...prev, dateStart: start, dateEnd: end }));
 
     loadServerData();
   }, []);
 
-  // --- Load from Firebase ---
+  // When applied filters change, reset pagination and clear forecast
+  useEffect(() => {
+    setDashboardPage(1);
+    setForecastData([]); // Clear old forecasts because they are invalid for new filter
+  }, [appliedFilters]);
+
+  // Sync draft filters when grouping or property changes immediately (optional, usually UX friendly)
+  useEffect(() => {
+     setAppliedFilters(prev => ({
+        ...prev, 
+        groupBy: draftFilters.groupBy, 
+        selectedProperty: draftFilters.selectedProperty,
+        sortBy: draftFilters.sortBy,
+        sortDir: draftFilters.sortDir
+     }));
+  }, [draftFilters.groupBy, draftFilters.selectedProperty, draftFilters.sortBy, draftFilters.sortDir]);
+
   const loadServerData = async () => {
     setLoading(true);
     setDebugInfo(null);
 
     try {
-        const dbRef = ref(db);
-        const snapshot = await get(child(dbRef, '/'));
+        const [inventorySnap, salesSnap] = await Promise.all([
+          get(child(ref(db), 'Inventory Management - Inventory Count Log')),
+          get(child(ref(db), 'Inventory Management - Kampstore Sales'))
+        ]);
 
-        if (snapshot.exists()) {
-            const data = snapshot.val();
+        if (salesSnap.exists()) {
+            const rawInventory = inventorySnap.exists() ? Object.values(inventorySnap.val()) : [];
+            const rawSales = Object.values(salesSnap.val());
             
-            // 1. Map Inventory Data (from "Inventory Management - Inventory Count Log")
-            const rawInventory = data["Inventory Management - Inventory Count Log"] 
-               ? Object.values(data["Inventory Management - Inventory Count Log"]) 
-               : [];
-               
             const inventoryArray: InventoryState[] = rawInventory.map((item: any) => ({
                 sku: String(item.SKU),
                 qtyOnHand: safeParseFloat(item.Counted_Qty)
             }));
-
-            // 2. Map Sales Data (from "Inventory Management - Kampstore Sales")
-            // This file serves as BOTH transactions AND product definitions
-            const rawSales = data["Inventory Management - Kampstore Sales"]
-               ? Object.values(data["Inventory Management - Kampstore Sales"])
-               : [];
 
             const transactionsArray: Transaction[] = rawSales.map((item: any) => ({
                 id: String(item.Report_UID || Math.random().toString(36)),
@@ -676,7 +749,6 @@ const App = () => {
                 property: item.Property || "Unknown"
             }));
 
-            // 3. Derive Unique Products from Sales Data
             const uniqueProductsMap = new Map<string, Product>();
             rawSales.forEach((item: any) => {
                const sku = String(item.SKU);
@@ -698,12 +770,11 @@ const App = () => {
             setTransactions(transactionsArray);
             setInventory(inventoryArray);
         } else {
-            console.log("No data available in Firebase");
             setProducts([]);
         }
     } catch (error: any) {
         console.error("Firebase Error:", error);
-        setDebugInfo({ error: error.message || String(error), details: "Failed to connect to Firebase Realtime Database." });
+        setDebugInfo({ error: error.message || String(error), details: "Failed to connect to Firebase." });
     } finally {
         setLoading(false);
     }
@@ -724,7 +795,7 @@ const App = () => {
   const salesHistoryMap = useMemo(() => {
     const map = new Map<string, number>();
     const relevantTransactions = transactions.filter(t => 
-       filters.selectedProperty === 'All' || t.property === filters.selectedProperty
+       appliedFilters.selectedProperty === 'All' || t.property === appliedFilters.selectedProperty
     );
 
     relevantTransactions.forEach(t => {
@@ -736,23 +807,26 @@ const App = () => {
       map.set(key, current + t.qtySold);
     });
     return map;
-  }, [transactions, filters.selectedProperty]);
+  }, [transactions, appliedFilters.selectedProperty]);
 
-  // --- PERFORMANCE OPTIMIZATION: GROUP TRANSACTIONS ONCE ---
+  // --- PERFORMANCE: GROUP TRANSACTIONS ---
   const transactionsBySku = useMemo(() => {
     const map = new Map<string, Transaction[]>();
     const propertyFilteredTx = transactions.filter(t => 
-       filters.selectedProperty === 'All' || t.property === filters.selectedProperty
+       appliedFilters.selectedProperty === 'All' || t.property === appliedFilters.selectedProperty
     );
-    const filteredTx = propertyFilteredTx.filter(t => t.date >= filters.dateStart && t.date <= filters.dateEnd);
+    const filteredTx = propertyFilteredTx.filter(t => t.date >= appliedFilters.dateStart && t.date <= appliedFilters.dateEnd);
     
     filteredTx.forEach(t => {
        if (!map.has(t.sku)) map.set(t.sku, []);
        map.get(t.sku)!.push(t);
     });
     return map;
-  }, [transactions, filters.selectedProperty, filters.dateStart, filters.dateEnd]);
+  }, [transactions, appliedFilters.selectedProperty, appliedFilters.dateStart, appliedFilters.dateEnd]);
 
+  // --- ANALYZED DATA (NO FORECAST) ---
+  // This memo only calculates the lightweight KPIs (Revenue, Sales, etc.)
+  // It returns EMPTY calendarSchedule arrays to save CPU.
   const analyzedData: AnalysisRow[] = useMemo(() => {
     if (products.length === 0) return [];
     
@@ -773,26 +847,20 @@ const App = () => {
         
         departments.add(prod.department);
         vendors.add(prod.vendor);
-
         totalCost += prod.cost;
 
-        // Use Pre-filtered Map
         const skuTx = transactionsBySku.get(sku) || [];
         const skuSold = skuTx.reduce((sum, t) => sum + t.qtySold, 0);
         const skuDiscount = skuTx.reduce((sum, t) => sum + (t.discount || 0), 0);
         
         qtySold += skuSold;
         discounts += skuDiscount;
-
         const skuGrossRevenue = skuSold * prod.price;
         const skuNetRevenue = skuGrossRevenue - skuDiscount;
-        
         grossRevenue += skuGrossRevenue;
         revenue += skuNetRevenue;
-        
         const cogs = skuSold * prod.cost;
         profit += (skuNetRevenue - cogs);
-
         const inv = inventory.find(i => i.sku === sku);
         qtyOnHand += inv ? inv.qtyOnHand : 0;
       });
@@ -801,72 +869,8 @@ const App = () => {
       const departmentLabel = Array.from(departments).join(', ');
       const vendorLabel = Array.from(vendors).join(', ');
 
-      const calendarSchedule: CellLogic[] = [];
-      let simulatedStock = qtyOnHand;
-      const today = new Date();
-      let hasHistory = false;
-
-      for (let i = 1; i <= 12; i++) {
-         const targetDate = new Date(today.getFullYear(), today.getMonth() + i, 1);
-         const targetMonth = targetDate.getMonth();
-         const targetYear = targetDate.getFullYear();
-         const monthLabel = targetDate.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
-
-         let totalHistoricalQty = 0;
-         let yearsFound = 0;
-
-         for (let y = 1; y <= 3; y++) {
-             const lookbackYear = targetYear - y;
-             let monthlySum = 0;
-             let yearHasSales = false;
-
-             skus.forEach(sku => {
-                const key = `${sku}_${lookbackYear}_${targetMonth}`;
-                const qty = salesHistoryMap.get(key) || 0;
-                if (qty > 0) {
-                   monthlySum += qty;
-                   yearHasSales = true;
-                }
-             });
-
-             if (yearHasSales) { 
-                 totalHistoricalQty += monthlySum;
-                 yearsFound++;
-             }
-         }
-         
-         if (yearsFound > 0) hasHistory = true;
-
-         const historicalAverage = yearsFound > 0 ? totalHistoricalQty / yearsFound : 0;
-         const avgRunRate = qtySold / 3; 
-         const forecastedDemand = historicalAverage > 0 ? Math.ceil(historicalAverage * 1.05) : Math.ceil(avgRunRate);
-
-         const nextMonthDemand = forecastedDemand; 
-         const targetStock = nextMonthDemand; 
-         const openingStock = simulatedStock;
-         const requiredParams = (forecastedDemand + targetStock) - openingStock;
-         const restockQty = Math.max(0, requiredParams);
-         const restockCost = restockQty * productCost;
-         const closingStock = openingStock + restockQty - forecastedDemand;
-         simulatedStock = Math.max(0, closingStock);
-
-         calendarSchedule.push({
-            monthIndex: i - 1,
-            monthLabel,
-            forecastedDemand,
-            openingStock,
-            targetStock,
-            restockQty,
-            restockCost,
-            closingStock,
-            historicalAverage
-         });
-      }
-
-      if (qtySold > 0) hasHistory = true;
-
-      const d1 = new Date(filters.dateStart);
-      const d2 = new Date(filters.dateEnd);
+      const d1 = new Date(appliedFilters.dateStart);
+      const d2 = new Date(appliedFilters.dateEnd);
       const monthsDiff = Math.max(1, (d2.getTime() - d1.getTime()) / (1000 * 60 * 60 * 24 * 30));
       const avgMonthlyDemand = qtySold / monthsDiff;
       const monthsOfSupply = avgMonthlyDemand > 0 ? qtyOnHand / avgMonthlyDemand : 999;
@@ -876,42 +880,44 @@ const App = () => {
         id, name, category, isGroup, skus, productCost, department: departmentLabel, vendor: vendorLabel,
         qtySold, grossRevenue, revenue, profit, discounts, qtyOnHand,
         avgMonthlyDemand, monthsOfSupply, suggestedReorder,
-        calendarSchedule, hasHistory
+        calendarSchedule: [], // Empty for speed
+        hasHistory: false
       };
     };
 
     let rows: AnalysisRow[] = [];
-    if (filters.groupBy === 'sku') {
+    if (appliedFilters.groupBy === 'sku') {
       rows = products.map(p => calculateMetrics([p.sku], p.sku, p.name, p.category, false));
-    } else if (filters.groupBy === 'category') {
+    } else if (appliedFilters.groupBy === 'category') {
       const cats = Array.from(new Set(products.map(p => p.category)));
       rows = cats.map(c => calculateMetrics(products.filter(p => p.category === c).map(p => p.sku), c, `Category: ${c}`, c, true));
-    } else if (filters.groupBy === 'custom') {
+    } else if (appliedFilters.groupBy === 'custom') {
       rows = customGroups.map(g => calculateMetrics(g.skus, g.id, g.name, 'Custom Group', true));
       const groupedSkus = new Set(customGroups.flatMap(g => g.skus));
       const ungroupedProducts = products.filter(p => !groupedSkus.has(p.sku));
       rows = [...rows, ...ungroupedProducts.map(p => calculateMetrics([p.sku], p.sku, p.name, p.category, false))];
     }
 
+    const searchTerm = appliedFilters.search.toLowerCase();
     let result = rows.filter(r => {
-      const searchTerm = filters.search.toLowerCase();
+      const matchName = appliedFilters.searchFields.includes('name') && r.name.toLowerCase().includes(searchTerm);
+      const matchSku = appliedFilters.searchFields.includes('sku') && r.id.toLowerCase().includes(searchTerm);
+      const matchVendor = appliedFilters.searchFields.includes('vendor') && r.vendor.toLowerCase().includes(searchTerm);
+      const matchCategory = appliedFilters.searchFields.includes('category') && r.category.toLowerCase().includes(searchTerm);
       
-      const matchName = filters.searchFields.includes('name') && r.name.toLowerCase().includes(searchTerm);
-      const matchSku = filters.searchFields.includes('sku') && r.id.toLowerCase().includes(searchTerm);
-      const matchVendor = filters.searchFields.includes('vendor') && r.vendor.toLowerCase().includes(searchTerm);
-      const matchCategory = filters.searchFields.includes('category') && r.category.toLowerCase().includes(searchTerm);
-      
-      const matchSearch = matchName || matchSku || matchVendor || matchCategory;
+      const matchSearch = appliedFilters.searchFields.length === 0 
+          ? (r.name.toLowerCase().includes(searchTerm) || r.id.toLowerCase().includes(searchTerm)) 
+          : (matchName || matchSku || matchVendor || matchCategory);
 
-      const matchCat = filters.categories.length === 0 || filters.categories.includes(r.category);
-      const matchDept = filters.departments.length === 0 || filters.departments.some(d => r.department.includes(d));
-      const matchVendorFilter = filters.vendors.length === 0 || filters.vendors.some(v => r.vendor.includes(v));
+      const matchCat = appliedFilters.categories.length === 0 || appliedFilters.categories.includes(r.category);
+      const matchDept = appliedFilters.departments.length === 0 || appliedFilters.departments.some(d => r.department.includes(d));
+      const matchVendorFilter = appliedFilters.vendors.length === 0 || appliedFilters.vendors.some(v => r.vendor.includes(v));
       return matchSearch && matchCat && matchDept && matchVendorFilter;
     });
 
     result.sort((a, b) => {
-       const field = filters.sortBy;
-       const dir = filters.sortDir === 'asc' ? 1 : -1;
+       const field = appliedFilters.sortBy;
+       const dir = appliedFilters.sortDir === 'asc' ? 1 : -1;
        let valA = a[field as keyof AnalysisRow];
        let valB = b[field as keyof AnalysisRow];
        if (typeof valA === 'string' && typeof valB === 'string') return valA.localeCompare(valB) * dir;
@@ -920,10 +926,108 @@ const App = () => {
     });
 
     return result;
-  }, [products, transactionsBySku, inventory, customGroups, filters, salesHistoryMap]);
+  }, [products, transactionsBySku, inventory, customGroups, appliedFilters]);
+
+  // --- MANUAL FORECAST TRIGGER ---
+  const handleRunForecast = () => {
+    setIsForecasting(true);
+    // Use setTimeout to allow UI to show "Calculating..." spinner
+    setTimeout(() => {
+       const today = new Date();
+       const newForecastData = analyzedData.map(row => {
+          // Clone row to avoid mutation
+          const enrichedRow = { ...row };
+          const calendarSchedule: CellLogic[] = [];
+          let simulatedStock = row.qtyOnHand;
+          let hasHistory = false;
+
+          for (let i = 1; i <= 12; i++) {
+             const targetDate = new Date(today.getFullYear(), today.getMonth() + i, 1);
+             const targetMonth = targetDate.getMonth();
+             const targetYear = targetDate.getFullYear();
+             const monthLabel = targetDate.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+
+             let totalHistoricalQty = 0;
+             let yearsFound = 0;
+
+             for (let y = 1; y <= 3; y++) {
+                 const lookbackYear = targetYear - y;
+                 let monthlySum = 0;
+                 let yearHasSales = false;
+
+                 row.skus.forEach(sku => {
+                    const key = `${sku}_${lookbackYear}_${targetMonth}`;
+                    const qty = salesHistoryMap.get(key) || 0;
+                    if (qty > 0) {
+                       monthlySum += qty;
+                       yearHasSales = true;
+                    }
+                 });
+
+                 if (yearHasSales) { 
+                     totalHistoricalQty += monthlySum;
+                     yearsFound++;
+                 }
+             }
+             
+             if (yearsFound > 0) hasHistory = true;
+
+             const historicalAverage = yearsFound > 0 ? totalHistoricalQty / yearsFound : 0;
+             // Fallback to simple run rate if no history
+             const avgRunRate = row.qtySold / 3; 
+             const forecastedDemand = historicalAverage > 0 ? Math.ceil(historicalAverage * 1.05) : Math.ceil(avgRunRate);
+
+             const nextMonthDemand = forecastedDemand; 
+             const targetStock = nextMonthDemand; 
+             const openingStock = simulatedStock;
+             const requiredParams = (forecastedDemand + targetStock) - openingStock;
+             const restockQty = Math.max(0, requiredParams);
+             const restockCost = restockQty * row.productCost;
+             const closingStock = openingStock + restockQty - forecastedDemand;
+             simulatedStock = Math.max(0, closingStock);
+
+             calendarSchedule.push({
+                monthIndex: i - 1,
+                monthLabel,
+                forecastedDemand,
+                openingStock,
+                targetStock,
+                restockQty,
+                restockCost,
+                closingStock,
+                historicalAverage
+             });
+          }
+          enrichedRow.calendarSchedule = calendarSchedule;
+          enrichedRow.hasHistory = hasHistory;
+          return enrichedRow;
+       });
+       
+       setForecastData(newForecastData);
+       setIsForecasting(false);
+    }, 100);
+  };
+
+  // --- UI Handlers ---
+
+  const handleApplyFilters = () => {
+     setAppliedFilters(draftFilters);
+  };
+
+  const paginatedDashboardRows = useMemo(() => {
+     return analyzedData.slice((dashboardPage - 1) * dashboardItemsPerPage, dashboardPage * dashboardItemsPerPage);
+  }, [analyzedData, dashboardPage]);
+
+  const dashboardTotalPages = Math.ceil(analyzedData.length / dashboardItemsPerPage);
 
   const handleSort = (field: string) => {
-     setFilters(prev => ({
+     setDraftFilters(prev => ({
+       ...prev,
+       sortBy: field as any,
+       sortDir: prev.sortBy === field && prev.sortDir === 'desc' ? 'asc' : 'desc'
+     }));
+     // Sort applies immediately
+     setAppliedFilters(prev => ({
        ...prev,
        sortBy: field as any,
        sortDir: prev.sortBy === field && prev.sortDir === 'desc' ? 'asc' : 'desc'
@@ -931,11 +1035,11 @@ const App = () => {
   };
 
   const handleSearchFieldChange = (field: string) => {
-    setFilters(prev => {
+    setDraftFilters(prev => {
       const fields = prev.searchFields.includes(field)
         ? prev.searchFields.filter(f => f !== field)
         : [...prev.searchFields, field];
-      return { ...prev, searchFields: fields.length > 0 ? fields : ['name'] }; // Ensure at least one field
+      return { ...prev, searchFields: fields };
     });
   };
 
@@ -998,7 +1102,7 @@ const App = () => {
     setSelectedSkus(new Set());
     setNewGroupName('');
     setIsGroupModalOpen(false);
-    setFilters(prev => ({ ...prev, groupBy: 'custom' }));
+    setDraftFilters(prev => ({ ...prev, groupBy: 'custom' })); // Update draft
   };
 
   const onCellExplain = () => { handleSendMessage("EXPLAIN_CELL_LOGIC"); };
@@ -1054,8 +1158,8 @@ const App = () => {
           <div>
              <label className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2 block">Store Location</label>
              <select 
-               value={filters.selectedProperty} 
-               onChange={e => setFilters(p => ({...p, selectedProperty: e.target.value}))} 
+               value={draftFilters.selectedProperty} 
+               onChange={e => setDraftFilters(p => ({...p, selectedProperty: e.target.value}))} 
                className="w-full bg-[var(--card-bg)] text-xs border border-[var(--border-color)] rounded p-2 outline-none text-[var(--text-color)] focus:border-[var(--primary-color)]"
              >
                <option value="All">All Locations (Company Total)</option>
@@ -1071,14 +1175,14 @@ const App = () => {
               <input 
                 type="date" 
                 className="w-full bg-[var(--card-bg)] text-xs border border-[var(--border-color)] rounded p-2 outline-none text-[var(--text-color)] focus:border-[var(--primary-color)]"
-                value={filters.dateStart}
-                onChange={(e) => setFilters(prev => ({...prev, dateStart: e.target.value}))}
+                value={draftFilters.dateStart}
+                onChange={(e) => setDraftFilters(prev => ({...prev, dateStart: e.target.value}))}
               />
               <input 
                 type="date" 
                 className="w-full bg-[var(--card-bg)] text-xs border border-[var(--border-color)] rounded p-2 outline-none text-[var(--text-color)] focus:border-[var(--primary-color)]"
-                value={filters.dateEnd}
-                onChange={(e) => setFilters(prev => ({...prev, dateEnd: e.target.value}))}
+                value={draftFilters.dateEnd}
+                onChange={(e) => setDraftFilters(prev => ({...prev, dateEnd: e.target.value}))}
               />
             </div>
           </div>
@@ -1089,20 +1193,26 @@ const App = () => {
               type="text" 
               className="w-full bg-[var(--card-bg)] text-xs border border-[var(--border-color)] rounded p-2 outline-none text-[var(--text-color)] focus:border-[var(--primary-color)]"
               placeholder="Search items..."
-              value={filters.search}
-              onChange={(e) => setFilters(prev => ({...prev, search: e.target.value}))}
+              value={draftFilters.search}
+              onChange={(e) => setDraftFilters(prev => ({...prev, search: e.target.value}))}
             />
             <div className="mt-2 flex flex-wrap gap-2">
               {['name', 'sku', 'vendor', 'category'].map(field => (
                 <button 
                   key={field}
                   onClick={() => handleSearchFieldChange(field)}
-                  className={`text-[10px] px-2 py-1 rounded border capitalize ${filters.searchFields.includes(field) ? 'bg-[var(--primary-color)] text-white border-[var(--primary-color)]' : 'bg-[var(--card-bg)] text-[var(--text-muted)] border-[var(--border-color)]'}`}
+                  className={`text-[10px] px-2 py-1 rounded border capitalize ${draftFilters.searchFields.includes(field) ? 'bg-[var(--primary-color)] text-white border-[var(--primary-color)]' : 'bg-[var(--card-bg)] text-[var(--text-muted)] border-[var(--border-color)]'}`}
                 >
                   {field}
                 </button>
               ))}
             </div>
+          </div>
+
+          <div>
+             <Button variant="primary" onClick={handleApplyFilters} className="w-full mt-2">
+               <i className="fa-solid fa-filter mr-2"></i> Apply Filters
+             </Button>
           </div>
 
           <div>
@@ -1113,12 +1223,12 @@ const App = () => {
                   <button 
                      key={dept} 
                      onClick={() => {
-                        const next = filters.departments.includes(dept) 
-                           ? filters.departments.filter(d => d !== dept)
-                           : [...filters.departments, dept];
-                        setFilters(p => ({...p, departments: next}));
+                        const next = draftFilters.departments.includes(dept) 
+                           ? draftFilters.departments.filter(d => d !== dept)
+                           : [...draftFilters.departments, dept];
+                        setDraftFilters(p => ({...p, departments: next}));
                      }}
-                     className={`text-[10px] px-2 py-1 rounded border ${filters.departments.includes(dept) ? 'bg-[var(--primary-color)] border-[var(--primary-color)] text-white' : 'bg-[var(--card-bg)] border-[var(--border-color)] text-[var(--text-muted)]'}`}
+                     className={`text-[10px] px-2 py-1 rounded border ${draftFilters.departments.includes(dept) ? 'bg-[var(--primary-color)] border-[var(--primary-color)] text-white' : 'bg-[var(--card-bg)] border-[var(--border-color)] text-[var(--text-muted)]'}`}
                   >
                      {dept}
                   </button>
@@ -1134,12 +1244,12 @@ const App = () => {
                   <button 
                      key={v} 
                      onClick={() => {
-                        const next = filters.vendors.includes(v) 
-                           ? filters.vendors.filter(i => i !== v)
-                           : [...filters.vendors, v];
-                        setFilters(p => ({...p, vendors: next}));
+                        const next = draftFilters.vendors.includes(v) 
+                           ? draftFilters.vendors.filter(i => i !== v)
+                           : [...draftFilters.vendors, v];
+                        setDraftFilters(p => ({...p, vendors: next}));
                      }}
-                     className={`text-[10px] px-2 py-1 rounded border ${filters.vendors.includes(v) ? 'bg-purple-600 border-purple-500 text-white' : 'bg-[var(--card-bg)] border-[var(--border-color)] text-[var(--text-muted)]'}`}
+                     className={`text-[10px] px-2 py-1 rounded border ${draftFilters.vendors.includes(v) ? 'bg-purple-600 border-purple-500 text-white' : 'bg-[var(--card-bg)] border-[var(--border-color)] text-[var(--text-muted)]'}`}
                   >
                      {v}
                   </button>
@@ -1151,12 +1261,12 @@ const App = () => {
             <label className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2 block">Group By</label>
             <div className="flex bg-[var(--card-bg)] p-1 rounded border border-[var(--border-color)]">
               {['sku', 'category', 'custom'].map((mode) => (
-                <button key={mode} onClick={() => setFilters(prev => ({ ...prev, groupBy: mode as any }))} className={`flex-1 text-xs py-1.5 rounded capitalize transition-all ${filters.groupBy === mode ? 'bg-[var(--primary-color)] text-white shadow' : 'text-[var(--text-muted)] hover:text-white'}`}>
+                <button key={mode} onClick={() => setDraftFilters(prev => ({ ...prev, groupBy: mode as any }))} className={`flex-1 text-xs py-1.5 rounded capitalize transition-all ${draftFilters.groupBy === mode ? 'bg-[var(--primary-color)] text-white shadow' : 'text-[var(--text-muted)] hover:text-white'}`}>
                   {mode}
                 </button>
               ))}
             </div>
-            {filters.groupBy === 'custom' && (
+            {draftFilters.groupBy === 'custom' && (
               <button onClick={() => setIsGroupModalOpen(true)} className="w-full mt-2 text-xs border border-dashed border-[var(--border-color)] text-[var(--text-muted)] py-1.5 rounded hover:border-[var(--primary-color)] hover:text-[var(--primary-color)] transition-colors">
                 + Create Group
               </button>
@@ -1186,7 +1296,7 @@ const App = () => {
                <h2 className="text-2xl font-bold text-[var(--text-color)]">{view === 'dashboard' ? 'Performance Dashboard' : 'Dynamic Re-Stock Calendar'}</h2>
                <p className="text-[var(--text-muted)] text-sm">
                  {view === 'dashboard' 
-                   ? `Analyzing metrics from ${filters.dateStart} to ${filters.dateEnd} for ${filters.selectedProperty === 'All' ? 'All Locations' : filters.selectedProperty}` 
+                   ? `Analyzing metrics from ${appliedFilters.dateStart} to ${appliedFilters.dateEnd} for ${appliedFilters.selectedProperty === 'All' ? 'All Locations' : appliedFilters.selectedProperty}` 
                    : 'Projection based on Seasonality (Last Year Data) + 1 Month Forward Cover'
                  }
                </p>
@@ -1252,8 +1362,8 @@ const App = () => {
                   <table className="w-full text-left text-[var(--text-muted)]">
                     <thead className="bg-[var(--sidebar-bg)] text-[var(--text-color)] uppercase font-bold text-xs sticky top-0">
                       <tr>
-                        {filters.groupBy === 'custom' && <th className="px-4 py-3 w-10">Select</th>}
-                        <HeaderWithInfo label="Item / Group" infoQuery="Item name" onExplain={() => {}} sortable onSort={() => handleSort('name')} currentSort={filters.sortBy === 'name'} currentDir={filters.sortDir} />
+                        {appliedFilters.groupBy === 'custom' && <th className="px-4 py-3 w-10">Select</th>}
+                        <HeaderWithInfo label="Item / Group" infoQuery="Item name" onExplain={() => {}} sortable onSort={() => handleSort('name')} currentSort={appliedFilters.sortBy === 'name'} currentDir={appliedFilters.sortDir} />
                         <HeaderWithInfo label="Category" infoQuery="Product Category" onExplain={() => {}} />
                         <HeaderWithInfo 
                            label="Qty Sold" 
@@ -1261,7 +1371,7 @@ const App = () => {
                            infoQuery="Qty Sold"
                            onExplain={() => handleExplainHeader('Qty Sold', 'Total units sold within the selected date range.')} 
                            className="text-right text-blue-300"
-                           sortable onSort={() => handleSort('qtySold')} currentSort={filters.sortBy === 'qtySold'} currentDir={filters.sortDir}
+                           sortable onSort={() => handleSort('qtySold')} currentSort={appliedFilters.sortBy === 'qtySold'} currentDir={appliedFilters.sortDir}
                         />
                         <HeaderWithInfo 
                            label="Gross Revenue" 
@@ -1269,7 +1379,7 @@ const App = () => {
                            infoQuery="Gross Revenue"
                            onExplain={() => handleExplainHeader('Gross Revenue', 'Total sales value before discounts are applied (Qty * Unit Price).')} 
                            className="text-right text-blue-400 bg-[var(--app-bg)]/30"
-                           sortable onSort={() => handleSort('grossRevenue')} currentSort={filters.sortBy === 'grossRevenue'} currentDir={filters.sortDir}
+                           sortable onSort={() => handleSort('grossRevenue')} currentSort={appliedFilters.sortBy === 'grossRevenue'} currentDir={appliedFilters.sortDir}
                         />
                         <HeaderWithInfo 
                            label="Net Revenue" 
@@ -1277,7 +1387,7 @@ const App = () => {
                            infoQuery="Net Revenue"
                            onExplain={() => handleExplainHeader('Net Revenue', 'Gross Sales minus Discounts.')} 
                            className="text-right text-blue-300"
-                           sortable onSort={() => handleSort('revenue')} currentSort={filters.sortBy === 'revenue'} currentDir={filters.sortDir}
+                           sortable onSort={() => handleSort('revenue')} currentSort={appliedFilters.sortBy === 'revenue'} currentDir={appliedFilters.sortDir}
                         />
                         <HeaderWithInfo 
                            label="Discounts" 
@@ -1285,7 +1395,7 @@ const App = () => {
                            infoQuery="Discounts"
                            onExplain={() => handleExplainHeader('Discounts', 'Total value of price reductions given on sales.')} 
                            className="text-right text-amber-300"
-                           sortable onSort={() => handleSort('discounts')} currentSort={filters.sortBy === 'discounts'} currentDir={filters.sortDir}
+                           sortable onSort={() => handleSort('discounts')} currentSort={appliedFilters.sortBy === 'discounts'} currentDir={appliedFilters.sortDir}
                         />
                          <HeaderWithInfo 
                            label="Est. Profit" 
@@ -1293,7 +1403,7 @@ const App = () => {
                            infoQuery="Profit"
                            onExplain={() => handleExplainHeader('Estimated Profit', 'Net Revenue minus Cost of Goods Sold (COGS).')} 
                            className="text-right text-emerald-300"
-                           sortable onSort={() => handleSort('profit')} currentSort={filters.sortBy === 'profit'} currentDir={filters.sortDir}
+                           sortable onSort={() => handleSort('profit')} currentSort={appliedFilters.sortBy === 'profit'} currentDir={appliedFilters.sortDir}
                         />
                         <HeaderWithInfo 
                            label="On Hand" 
@@ -1322,14 +1432,14 @@ const App = () => {
                            infoQuery="Suggested Order"
                            onExplain={() => handleExplainHeader('Suggested Order', 'Recommended reorder quantity to maintain safety stock based on demand velocity.')} 
                            className="text-right bg-[var(--app-bg)]/50 text-red-300"
-                           sortable onSort={() => handleSort('suggestedReorder')} currentSort={filters.sortBy === 'suggestedReorder'} currentDir={filters.sortDir}
+                           sortable onSort={() => handleSort('suggestedReorder')} currentSort={appliedFilters.sortBy === 'suggestedReorder'} currentDir={appliedFilters.sortDir}
                         />
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[var(--border-color)] bg-[var(--card-bg)]">
-                      {analyzedData.map((row) => (
+                      {paginatedDashboardRows.map((row) => (
                         <tr key={row.id} className="hover:bg-[var(--app-bg)]/50 transition-colors group">
-                          {filters.groupBy === 'custom' && (
+                          {appliedFilters.groupBy === 'custom' && (
                             <td className="px-4 py-3">
                                {!row.isGroup && (
                                  <input type="checkbox" checked={selectedSkus.has(row.id)}
@@ -1370,16 +1480,31 @@ const App = () => {
                       ))}
                     </tbody>
                   </table>
+
+                  {/* Dashboard Pagination Controls */}
+                  <div className="bg-[var(--sidebar-bg)] border-t border-[var(--border-color)] p-4 flex justify-between items-center text-sm sticky bottom-0 z-30">
+                     <div className="flex items-center gap-4">
+                         <Button variant="secondary" onClick={() => setDashboardPage(p => Math.max(1, p - 1))} disabled={dashboardPage === 1}>Previous</Button>
+                         <span className="text-[var(--text-muted)]">Page {dashboardPage} of {dashboardTotalPages || 1}</span>
+                         <Button variant="secondary" onClick={() => setDashboardPage(p => Math.min(dashboardTotalPages, p + 1))} disabled={dashboardPage === dashboardTotalPages}>Next</Button>
+                     </div>
+                     <div className="text-[var(--text-muted)] text-xs">
+                        Showing {paginatedDashboardRows.length} of {analyzedData.length} items
+                     </div>
+                  </div>
                 </div>
               </Card>
             </>
           ) : !debugInfo && products.length > 0 && (
             <Card className="p-0 border-0 shadow-xl overflow-hidden bg-[var(--app-bg)] h-full flex flex-col relative">
                <CalendarView 
-                 rows={analyzedData} 
+                 rows={forecastData} // USE forecastData, not analyzedData
                  onCellClick={(row, cell) => setDetailModal({row, cell})} 
-                 sortConfig={{sortBy: filters.sortBy, sortDir: filters.sortDir}}
+                 sortConfig={{sortBy: appliedFilters.sortBy, sortDir: appliedFilters.sortDir}}
                  onSort={handleSort}
+                 onRunForecast={handleRunForecast}
+                 isForecasting={isForecasting}
+                 isForecasting={isForecasting}
                />
                <div className="absolute top-2 right-4 bg-[var(--card-bg)]/90 p-2 rounded text-[10px] text-[var(--text-muted)] border border-[var(--border-color)] pointer-events-none">
                  Tip: Select months in header to see period totals. Click cells for detail.

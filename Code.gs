@@ -62,69 +62,84 @@ function parseNum(val) {
 
 // --- MAIN DATA FETCHING ---
 function getData() {
-  let ss;
+  // Master Try/Catch to ensure frontend always gets a response object
   try {
-    ss = SpreadsheetApp.openById(CONFIG.spreadsheetId);
-  } catch (e) {
-    throw new Error(`Could not open Spreadsheet with ID: ${CONFIG.spreadsheetId}. Check permissions or ID.`);
-  }
-  
-  // Helper to fetch and map data based on CONFIG
-  const getMappedData = (configKey) => {
-    const sheetConfig = CONFIG.sheets[configKey];
-    const sheet = ss.getSheetByName(sheetConfig.tabName);
-    
-    if (!sheet) {
-      console.warn(`Sheet named '${sheetConfig.tabName}' not found.`);
-      return [];
+    let ss;
+    try {
+      ss = SpreadsheetApp.openById(CONFIG.spreadsheetId);
+    } catch (e) {
+      return { 
+        products: [], transactions: [], inventory: [], 
+        debug: { error: "Spreadsheet Access Error", details: `Could not open ID: ${CONFIG.spreadsheetId}. Check permissions.` }
+      };
     }
     
-    const dataRange = sheet.getDataRange();
-    const values = dataRange.getValues();
-    if (values.length < 2) return []; // No data
-    
-    const headers = values.shift(); // Remove first row
-    
-    // Create a map of { "lowercase_header": columnIndex } for robust matching
-    const headerMap = {};
-    headers.forEach((h, i) => {
-      if (h) headerMap[h.toString().trim().toLowerCase()] = i;
-    });
-    
-    // Define which internal keys are numeric
-    const numericKeys = ['cost', 'price', 'qtySold', 'discount', 'qtyOnHand'];
-
-    return values.map(row => {
-      const obj = {};
-      Object.keys(sheetConfig.columns).forEach(appKey => {
-        const sheetHeader = sheetConfig.columns[appKey];
-        const lookupKey = sheetHeader.toLowerCase();
-        const colIndex = headerMap[lookupKey];
-        
-        if (colIndex !== undefined) {
-          const rawVal = row[colIndex];
-          if (numericKeys.includes(appKey)) {
-            obj[appKey] = parseNum(rawVal);
-          } else {
-            obj[appKey] = rawVal ? rawVal.toString() : "";
-          }
-        } else {
-          // Default values if column is missing
-          if (numericKeys.includes(appKey)) {
-             obj[appKey] = 0;
-          } else {
-             obj[appKey] = "";
-          }
-        }
+    // Helper to fetch and map data based on CONFIG
+    const getMappedData = (configKey) => {
+      const sheetConfig = CONFIG.sheets[configKey];
+      const sheet = ss.getSheetByName(sheetConfig.tabName);
+      
+      if (!sheet) {
+        return { error: true, msg: `Sheet '${sheetConfig.tabName}' not found.` };
+      }
+      
+      const dataRange = sheet.getDataRange();
+      const values = dataRange.getValues();
+      if (values.length < 2) return []; // No data
+      
+      const headers = values.shift(); // Remove first row
+      
+      // Create a map of { "lowercase_header": columnIndex } for robust matching
+      const headerMap = {};
+      headers.forEach((h, i) => {
+        if (h) headerMap[h.toString().trim().toLowerCase()] = i;
       });
-      return obj;
-    });
-  };
+      
+      // Define which internal keys are numeric
+      const numericKeys = ['cost', 'price', 'qtySold', 'discount', 'qtyOnHand'];
 
-  try {
+      return values.map(row => {
+        const obj = {};
+        Object.keys(sheetConfig.columns).forEach(appKey => {
+          const sheetHeader = sheetConfig.columns[appKey];
+          const lookupKey = sheetHeader.toLowerCase();
+          const colIndex = headerMap[lookupKey];
+          
+          if (colIndex !== undefined) {
+            const rawVal = row[colIndex];
+            if (numericKeys.includes(appKey)) {
+              obj[appKey] = parseNum(rawVal);
+            } else {
+              obj[appKey] = rawVal ? rawVal.toString() : "";
+            }
+          } else {
+            // Default values if column is missing
+            if (numericKeys.includes(appKey)) {
+               obj[appKey] = 0;
+            } else {
+               obj[appKey] = "";
+            }
+          }
+        });
+        return obj;
+      });
+    };
+
     const productsRaw = getMappedData('products');
     const transactionsRaw = getMappedData('transactions');
     const inventoryRaw = getMappedData('inventory');
+
+    // Check for missing sheets
+    if (productsRaw.error || transactionsRaw.error) {
+       return {
+         products: [], transactions: [], inventory: [],
+         debug: { 
+           error: "Missing Tabs", 
+           details: [productsRaw.msg, transactionsRaw.msg].filter(Boolean).join(" "),
+           tabsAvailable: ss.getSheets().map(s => s.getName())
+         }
+       };
+    }
 
     // Deduplicate Products
     const productMap = new Map();
@@ -137,15 +152,17 @@ function getData() {
 
     // Deduplicate Inventory
     const inventoryMap = new Map();
-    inventoryRaw.forEach(i => {
-      if (i.sku && i.sku.toString().trim() !== "") {
-        inventoryMap.set(i.sku, i);
-      }
-    });
+    if (Array.isArray(inventoryRaw)) {
+      inventoryRaw.forEach(i => {
+        if (i.sku && i.sku.toString().trim() !== "") {
+          inventoryMap.set(i.sku, i);
+        }
+      });
+    }
     const uniqueInventory = Array.from(inventoryMap.values());
 
     // Clean Transactions Dates
-    const cleanTransactions = transactionsRaw.map(t => {
+    const cleanTransactions = (Array.isArray(transactionsRaw) ? transactionsRaw : []).map(t => {
       let dateStr = new Date().toISOString().split('T')[0];
       try {
         if (t.date) {
@@ -159,7 +176,6 @@ function getData() {
     });
 
     if (uniqueProducts.length === 0) {
-       // Return debug info if no products found
        return { 
          products: [], 
          transactions: [], 
@@ -177,6 +193,7 @@ function getData() {
       transactions: cleanTransactions,
       inventory: uniqueInventory
     };
+
   } catch (e) {
     Logger.log(e);
     return {
@@ -209,7 +226,6 @@ function callGeminiAPI(prompt, modelName) {
     const json = JSON.parse(response.getContentText());
     
     if (json.error) {
-       // Pass the actual error message back to client
        throw new Error(`Gemini API Error: ${json.error.message} (Status: ${json.error.code})`);
     }
     
@@ -221,18 +237,4 @@ function callGeminiAPI(prompt, modelName) {
   } catch (e) {
     throw new Error(e.message);
   }
-}
-
-// --- DEBUG HELPER ---
-function debugSpreadsheetStructure() {
-  const ss = SpreadsheetApp.openById(CONFIG.spreadsheetId);
-  const sheets = ss.getSheets();
-  
-  Logger.log("=== SPREADSHEET STRUCTURE ===");
-  sheets.forEach(sheet => {
-    Logger.log(`[TAB] ${sheet.getName()}`);
-    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-    Logger.log(`   HEADERS: ${headers.join(", ")}`);
-  });
-  Logger.log("=============================");
 }

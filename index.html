@@ -78,6 +78,39 @@
     const { useState, useEffect, useRef, useMemo } = React;
     const { createRoot } = ReactDOM;
 
+    // Error Boundary to prevent white screens
+    class ErrorBoundary extends React.Component {
+      constructor(props) {
+        super(props);
+        this.state = { hasError: false, error: null };
+      }
+      static getDerivedStateFromError(error) {
+        return { hasError: true, error };
+      }
+      componentDidCatch(error, errorInfo) {
+        console.error("React Error:", error, errorInfo);
+      }
+      render() {
+        if (this.state.hasError) {
+          return (
+            <div className="p-8 text-red-500 bg-[var(--app-bg)] min-h-screen">
+              <h1 className="text-xl font-bold mb-4">Something went wrong.</h1>
+              <div className="bg-red-900/20 border border-red-500/50 p-4 rounded text-sm font-mono overflow-auto">
+                {this.state.error && this.state.error.toString()}
+              </div>
+              <button 
+                onClick={() => window.location.reload()} 
+                className="mt-6 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded transition-colors"
+              >
+                Reload Application
+              </button>
+            </div>
+          );
+        }
+        return this.props.children; 
+      }
+    }
+
     const DEFAULT_SETTINGS = {
       fontSize: 'text-sm',
       colors: {
@@ -300,7 +333,11 @@
       useEffect(() => {
         if (!data || data.length === 0 || !barChartRef.current) return;
         
-        if (typeof Chart === 'undefined') return;
+        // Ensure Chart is available global
+        if (typeof Chart === 'undefined') {
+          console.warn("Chart.js not loaded");
+          return;
+        }
 
         if (chartInstance.current) chartInstance.current.destroy();
 
@@ -1354,8 +1391,13 @@
       );
     };
 
+    // Wrap App in ErrorBoundary
     const root = createRoot(document.getElementById('root'));
-    root.render(<App />);
+    root.render(
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
+    );
   </script>
 </body>
 </html>

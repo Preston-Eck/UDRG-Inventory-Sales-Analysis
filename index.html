@@ -24,7 +24,6 @@
   
   <style>
     body { background-color: #0f172a; color: #e2e8f0; font-family: 'Inter', sans-serif; }
-    /* Hide scrollbars for cleaner UI in iframe */
     ::-webkit-scrollbar { width: 8px; height: 8px; }
     ::-webkit-scrollbar-track { background: #1e293b; }
     ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
@@ -44,10 +43,7 @@
   </style>
 
   <script>
-    // 1. Polyfill process.env
     window.process = { env: { API_KEY: '' } };
-
-    // 2. Global Error Handler
     window.onerror = function(message, source, lineno, colno, error) {
       const errorDiv = document.getElementById('error-container');
       if (errorDiv) {
@@ -73,7 +69,7 @@
   <div id="error-container"></div>
 
   <!-- APPLICATION LOGIC -->
-  <script type="text/babel" data-presets="react,typescript">
+  <script type="text/babel" data-presets="react">
     // Check if libraries loaded
     if (typeof React === 'undefined' || typeof ReactDOM === 'undefined') {
       throw new Error("React or ReactDOM failed to load from CDN.");
@@ -82,130 +78,15 @@
     const { useState, useEffect, useRef, useMemo } = React;
     const { createRoot } = ReactDOM;
 
-    // --- Types & Interfaces ---
-    // Note: In Babel Standalone with typescript preset, interfaces are stripped.
-    
-    interface Product {
-      sku: string;
-      name: string;
-      department: string;
-      category: string;
-      vendor: string;
-      cost: number;
-      price: number;
-    }
-
-    interface Transaction {
-      id: string;
-      date: string;
-      sku: string;
-      qtySold: number;
-      discount?: number;
-      property: string;
-    }
-
-    interface InventoryState {
-      sku: string;
-      qtyOnHand: number;
-    }
-
-    interface CellLogic {
-      monthIndex: number;
-      monthLabel: string;
-      forecastedDemand: number;
-      openingStock: number;
-      targetStock: number;
-      restockQty: number;
-      restockCost: number;
-      closingStock: number;
-      historicalAverage: number;
-    }
-
-    interface AnalysisRow {
-      id: string;
-      name: string;
-      department: string;
-      category: string;
-      vendor: string;
-      isGroup: boolean;
-      skus: string[];
-      productCost: number;
-      qtySold: number;
-      grossRevenue: number;
-      discounts: number;
-      revenue: number;
-      profit: number;
-      qtyOnHand: number;
-      avgMonthlyDemand: number;
-      monthsOfSupply: number;
-      suggestedReorder: number;
-      calendarSchedule: CellLogic[];
-      hasHistory: boolean;
-    }
-
-    interface FilterState {
-      search: string;
-      categories: string[];
-      departments: string[];
-      vendors: string[];
-      dateStart: string;
-      dateEnd: string;
-      groupBy: 'sku' | 'category' | 'custom';
-      selectedProperty: string;
-      sortBy: keyof AnalysisRow | 'name' | 'revenue' | 'profit' | 'suggestedReorder';
-      sortDir: 'asc' | 'desc';
-      showColumns: {
-        sold: boolean;
-        revenue: boolean;
-        profit: boolean;
-        onHand: boolean;
-        demand: boolean;
-        reorder: boolean;
-      };
-    }
-
-    interface CustomGroup {
-      id: string;
-      name: string;
-      skus: string[];
-    }
-
-    interface ChatMessage {
-      role: 'user' | 'model';
-      text: string;
-      timestamp: Date;
-      isError?: boolean;
-    }
-
-    interface AppSettings {
-      fontSize: 'text-xs' | 'text-sm' | 'text-base' | 'text-lg';
-      colors: {
-        background: string;
-        sidebar: string;
-        card: string;
-        primary: string;
-        text: string;
-        border: string;
-      };
-      charts: {
-        showNetRevenue: boolean;
-        showGrossRevenue: boolean;
-        showProfit: boolean;
-        colorNetRevenue: string;
-        colorGrossRevenue: string;
-        colorProfit: string;
-      }
-    }
-
-    const DEFAULT_SETTINGS: AppSettings = {
+    const DEFAULT_SETTINGS = {
       fontSize: 'text-sm',
       colors: {
-        background: '#0f172a', // slate-900
-        sidebar: '#020617', // slate-950
-        card: '#1e293b', // slate-800
-        primary: '#10b981', // emerald-500
-        text: '#e2e8f0', // slate-200
-        border: '#334155', // slate-700
+        background: '#0f172a',
+        sidebar: '#020617',
+        card: '#1e293b',
+        primary: '#10b981',
+        text: '#e2e8f0',
+        border: '#334155',
       },
       charts: {
         showNetRevenue: true,
@@ -217,11 +98,9 @@
       }
     };
 
-    // --- Mock Data ---
-
     const MOCK_PROPERTIES = ['Downtown Store', 'North Mall Kiosk', 'Online Store', 'Westside Warehouse'];
 
-    const MOCK_PRODUCTS: Product[] = [
+    const MOCK_PRODUCTS = [
       { sku: 'EL001', name: 'Wireless Mouse', department: 'Peripherals', category: 'Electronics', vendor: 'LogiTechs', cost: 12, price: 29 },
       { sku: 'EL002', name: 'Mechanical Keyboard', department: 'Peripherals', category: 'Electronics', vendor: 'LogiTechs', cost: 45, price: 120 },
       { sku: 'EL003', name: 'USB-C Monitor', department: 'Displays', category: 'Electronics', vendor: 'DisplayPro', cost: 150, price: 350 },
@@ -232,8 +111,8 @@
     ];
 
     const generateMockData = () => {
-      const transactions: Transaction[] = [];
-      const inventory: InventoryState[] = [];
+      const transactions = [];
+      const inventory = [];
       const now = new Date();
       
       MOCK_PRODUCTS.forEach((p, index) => {
@@ -268,15 +147,13 @@
       return { products: MOCK_PRODUCTS, transactions, inventory };
     };
 
-    // --- Components ---
-
-    const Card = ({ children, className = '' }: { children?: React.ReactNode, className?: string }) => (
+    const Card = ({ children, className = '' }) => (
       <div className={`bg-[var(--card-bg)] border border-[var(--border-color)] rounded-lg p-4 shadow-sm ${className}`}>
         {children}
       </div>
     );
 
-    const Button = ({ onClick, children, variant = 'primary', className = '', disabled = false }: any) => {
+    const Button = ({ onClick, children, variant = 'primary', className = '', disabled = false }) => {
       const baseStyle = "px-4 py-2 rounded-md font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-[var(--sidebar-bg)] disabled:opacity-50 disabled:cursor-not-allowed";
       
       const style = variant === 'primary' 
@@ -293,7 +170,7 @@
       );
     };
 
-    const HeaderWithInfo = ({ label, infoQuery, onExplain, className = '', align = 'left', sortable = false, onSort, currentSort, currentDir }: any) => (
+    const HeaderWithInfo = ({ label, infoQuery, onExplain, className = '', align = 'left', sortable = false, onSort, currentSort, currentDir }) => (
       <th className={`px-4 py-3 ${className}`}>
         <div className={`flex items-center gap-1.5 ${align === 'right' ? 'justify-end' : 'justify-start'} group`}>
           <span 
@@ -312,19 +189,17 @@
       </th>
     );
 
-    // --- Settings Modal ---
-
-    const SettingsModal = ({ settings, onSave, onClose }: { settings: AppSettings, onSave: (s: AppSettings) => void, onClose: () => void }) => {
+    const SettingsModal = ({ settings, onSave, onClose }) => {
       const [localSettings, setLocalSettings] = useState(settings);
 
-      const updateColor = (category: 'colors' | 'charts', key: string, val: string) => {
+      const updateColor = (category, key, val) => {
         setLocalSettings(prev => ({
           ...prev,
           [category]: { ...prev[category], [key]: val }
         }));
       };
 
-      const updateChartVisibility = (key: string, val: boolean) => {
+      const updateChartVisibility = (key, val) => {
         setLocalSettings(prev => ({
           ...prev,
           charts: { ...prev.charts, [key]: val }
@@ -347,7 +222,7 @@
                       <label className="block text-xs mb-1">Text Size</label>
                       <select 
                         value={localSettings.fontSize} 
-                        onChange={e => setLocalSettings(p => ({...p, fontSize: e.target.value as any}))}
+                        onChange={e => setLocalSettings(p => ({...p, fontSize: e.target.value}))}
                         className="w-full bg-[var(--app-bg)] border border-[var(--border-color)] rounded p-2 text-[var(--text-color)]"
                       >
                         <option value="text-xs">Compact (XS)</option>
@@ -418,17 +293,13 @@
       );
     };
 
-    // --- Chart Component ---
-
-    const InventoryCharts = ({ data, settings }: { data: AnalysisRow[], settings: AppSettings }) => {
-      const barChartRef = useRef<HTMLCanvasElement>(null);
-      const chartInstance = useRef<any>(null);
+    const InventoryCharts = ({ data, settings }) => {
+      const barChartRef = useRef(null);
+      const chartInstance = useRef(null);
 
       useEffect(() => {
         if (!data || data.length === 0 || !barChartRef.current) return;
         
-        // Ensure Chart is available global
-        // @ts-ignore
         if (typeof Chart === 'undefined') return;
 
         if (chartInstance.current) chartInstance.current.destroy();
@@ -461,7 +332,6 @@
           });
         }
 
-        // @ts-ignore
         chartInstance.current = new Chart(barChartRef.current, {
           type: 'bar',
           data: {
@@ -489,15 +359,8 @@
       return <div className="h-64"><canvas ref={barChartRef} /></div>;
     };
 
-    // --- Calendar View Component ---
-
-    const CalendarView = ({ rows, onCellClick, sortConfig, onSort }: { 
-      rows: AnalysisRow[], 
-      onCellClick: (row: AnalysisRow, cell: CellLogic) => void,
-      sortConfig: { sortBy: string, sortDir: string },
-      onSort: (key: string) => void
-    }) => {
-      const [selectedMonths, setSelectedMonths] = useState<Set<number>>(new Set());
+    const CalendarView = ({ rows, onCellClick, sortConfig, onSort }) => {
+      const [selectedMonths, setSelectedMonths] = useState(new Set());
       const [isInactiveCollapsed, setIsInactiveCollapsed] = useState(true);
 
       const activeRows = rows.filter(r => r.hasHistory);
@@ -513,7 +376,7 @@
         return m;
       }, []);
 
-      const toggleMonth = (idx: number) => {
+      const toggleMonth = (idx) => {
         const newSet = new Set(selectedMonths);
         if (newSet.has(idx)) newSet.delete(idx);
         else newSet.add(idx);
@@ -522,7 +385,7 @@
 
       const maxSelectedIndex = useMemo(() => {
         if (selectedMonths.size <= 1) return -1;
-        return Math.max(...(Array.from(selectedMonths) as number[]));
+        return Math.max(...Array.from(selectedMonths));
       }, [selectedMonths]);
 
       const selectionTotals = useMemo(() => {
@@ -667,9 +530,7 @@
       );
     };
 
-    // --- Detail Modal ---
-
-    const CellDetailModal = ({ row, cell, onClose, onAiExplain, isThinking }: { row: AnalysisRow, cell: CellLogic, onClose: () => void, onAiExplain: () => void, isThinking: boolean }) => {
+    const CellDetailModal = ({ row, cell, onClose, onAiExplain, isThinking }) => {
       if (!row || !cell) return null;
 
       return (
@@ -739,8 +600,6 @@
         </div>
       );
     };
-
-    // --- Main Application ---
 
     const App = () => {
       const [view, setView] = useState('dashboard');

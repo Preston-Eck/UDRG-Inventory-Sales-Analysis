@@ -925,7 +925,7 @@ const App = () => {
     if (!customPrompt) setInputMessage('');
     setIsThinking(true);
 
-    let finalPrompt: string = text;
+    let finalPrompt = text;
     if (detailModal && text.includes("EXPLAIN_CELL")) {
          const dm = detailModal;
          finalPrompt = `
@@ -946,7 +946,7 @@ const App = () => {
     if (window.google && window.google.script) {
       window.google.script.run
         .withSuccessHandler((response: unknown) => {
-           // Explicitly cast the unknown response to string
+           // FIX: Explicitly cast unknown response to string to satisfy TypeScript
            const responseText = String(response);
            setMessages(prev => [...prev, { role: 'model', text: responseText, timestamp: new Date() }]);
            setIsThinking(false);

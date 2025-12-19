@@ -3,7 +3,7 @@
 export const firebaseConfig = {
   apiKey: "AIzaSyCrz3OdWlroE7wOnHxW_VIvSLBuSjrVxuk",
   authDomain: "inventory-and-sales-59f32.firebaseapp.com",
-  databaseURL: "https://inventory-and-sales-59f32-default-rtdb.firebaseio.com"
+  databaseURL: "https://inventory-and-sales-59f32-default-rtdb.firebaseio.com",
   projectId: "inventory-and-sales-59f32",
   storageBucket: "inventory-and-sales-59f32.firebasestorage.app",
   messagingSenderId: "665928205218",

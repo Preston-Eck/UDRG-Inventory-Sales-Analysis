@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createRoot } from 'react-dom/client';
+import { initializeApp, getApps, getApp } from 'firebase/app';
+import { getDatabase, ref, get, child } from 'firebase/database';
+import { firebaseConfig } from './firebaseConfig';
 
 // --- Types ---
 
@@ -80,6 +83,7 @@ interface AnalysisRow {
 
 interface FilterState {
   search: string;
+  searchFields: string[]; // Added for column selection
   categories: string[];
   departments: string[];
   vendors: string[];
@@ -154,12 +158,21 @@ const DEFAULT_SETTINGS: AppSettings = {
   }
 };
 
-// --- Mock Data ---
-const generateMockData = () => {
-  return { products: [], transactions: [], inventory: [] };
+// --- Firebase Init ---
+const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+const db = getDatabase(app);
+
+// --- Helpers ---
+
+// Robust parser to prevent NaN issues
+const safeParseFloat = (val: any) => {
+  if (val === undefined || val === null || val === '') return 0;
+  const str = String(val).replace(/[^0-9.-]+/g, ''); // Remove currency symbols, commas, etc
+  const num = parseFloat(str);
+  return isNaN(num) ? 0 : num;
 };
 
-// --- Helper Components ---
+// --- UI Components ---
 
 const Card = ({ children, className = '' }: { children?: React.ReactNode, className?: string }) => (
   <div className={`bg-[var(--card-bg)] border border-[var(--border-color)] rounded-lg p-4 shadow-sm ${className}`}>
@@ -282,20 +295,7 @@ const SettingsModal = ({ settings, onSave, onClose }: { settings: AppSettings, o
                  </div>
                  <input type="color" value={localSettings.charts.colorNetRevenue} onChange={e => updateColor('charts', 'colorNetRevenue', e.target.value)} className="h-6 w-10 bg-transparent rounded cursor-pointer" />
                </div>
-               <div className="flex items-center justify-between">
-                 <div className="flex items-center gap-2">
-                   <input type="checkbox" checked={localSettings.charts.showGrossRevenue} onChange={e => updateChartVisibility('showGrossRevenue', e.target.checked)} className="rounded border-slate-600 bg-[var(--app-bg)]"/>
-                   <span>Show Gross Revenue</span>
-                 </div>
-                 <input type="color" value={localSettings.charts.colorGrossRevenue} onChange={e => updateColor('charts', 'colorGrossRevenue', e.target.value)} className="h-6 w-10 bg-transparent rounded cursor-pointer" />
-               </div>
-               <div className="flex items-center justify-between">
-                 <div className="flex items-center gap-2">
-                   <input type="checkbox" checked={localSettings.charts.showProfit} onChange={e => updateChartVisibility('showProfit', e.target.checked)} className="rounded border-slate-600 bg-[var(--app-bg)]"/>
-                   <span>Show Profit</span>
-                 </div>
-                 <input type="color" value={localSettings.charts.colorProfit} onChange={e => updateColor('charts', 'colorProfit', e.target.value)} className="h-6 w-10 bg-transparent rounded cursor-pointer" />
-               </div>
+               {/* Add other chart controls here if needed */}
              </div>
            </section>
         </div>
@@ -333,22 +333,7 @@ const InventoryCharts = ({ data, settings }: { data: AnalysisRow[], settings: Ap
           yAxisID: 'y',
        });
     }
-    if (settings.charts.showGrossRevenue) {
-       datasets.push({
-          label: 'Gross Revenue ($)',
-          data: sorted.map(d => d.grossRevenue),
-          backgroundColor: settings.charts.colorGrossRevenue,
-          yAxisID: 'y',
-       });
-    }
-    if (settings.charts.showProfit) {
-       datasets.push({
-          label: 'Profit ($)',
-          data: sorted.map(d => d.profit),
-          backgroundColor: settings.charts.colorProfit,
-          yAxisID: 'y',
-       });
-    }
+    // Add other datasets based on settings
 
     // @ts-ignore
     chartInstance.current = new Chart(barChartRef.current, {
@@ -507,36 +492,6 @@ const CalendarView = ({ rows, onCellClick, sortConfig, onSort }: {
                 </td>
               </tr>
             ))}
-            
-            {inactiveRows.length > 0 && (
-              <>
-                <tr className="bg-[var(--sidebar-bg)] border-y border-[var(--border-color)] cursor-pointer hover:bg-[var(--app-bg)] transition-colors" onClick={() => setIsInactiveCollapsed(!isInactiveCollapsed)}>
-                   <td colSpan={100} className="px-4 py-3 text-center text-xs font-bold text-slate-500 uppercase tracking-widest sticky left-0 z-10">
-                      <div className="flex items-center justify-center gap-2">
-                        <i className={`fa-solid fa-chevron-${isInactiveCollapsed ? 'right' : 'down'}`}></i>
-                        Items with No Sales History at this Location ({inactiveRows.length})
-                      </div>
-                   </td>
-                </tr>
-                {!isInactiveCollapsed && inactiveRows.map(row => (
-                  <tr key={row.id} className="bg-[var(--app-bg)] opacity-60">
-                     <td className="px-4 py-3 font-medium text-[var(--text-muted)] border-r border-[var(--border-color)] bg-[var(--app-bg)] sticky left-0 z-10">
-                        <div className="flex flex-col gap-1">
-                           <span className="text-sm">{row.name}</span>
-                           <div className="flex flex-wrap gap-2 text-[10px] text-slate-500">
-                             <span className="border border-[var(--border-color)] px-1 rounded">{row.department}</span>
-                             <span className="border border-[var(--border-color)] px-1 rounded">{row.vendor}</span>
-                           </div>
-                        </div>
-                     </td>
-                     <td colSpan={months.length + (maxSelectedIndex > -1 ? months.length : 0) + 1} className="px-4 py-3 text-center text-xs italic text-[var(--text-muted)] bg-[var(--card-bg)]">
-                        No sales history available for this location. Re-stock projection disabled.
-                     </td>
-                     <td className="sticky right-0 bg-[var(--app-bg)] border-l-2 border-[var(--border-color)]"></td>
-                  </tr>
-                ))}
-              </>
-            )}
           </tbody>
         </table>
       </div>
@@ -652,6 +607,7 @@ const App = () => {
 
   const [filters, setFilters] = useState<FilterState>({
     search: '',
+    searchFields: ['name'],
     categories: [],
     departments: [],
     vendors: [],
@@ -683,33 +639,72 @@ const App = () => {
     loadServerData();
   }, []);
 
-  const loadServerData = () => {
+  // --- Load from Firebase ---
+  const loadServerData = async () => {
     setLoading(true);
     setDebugInfo(null);
-    if (window.google && window.google.script) {
-        window.google.script.run
-            .withSuccessHandler((data: any) => {
-                if (data && data.products && data.products.length > 0) {
-                    setProducts(data.products);
-                    setTransactions(data.transactions || []);
-                    setInventory(data.inventory || []);
-                } else if (data && data.debug) {
-                    setDebugInfo(data.debug);
-                    setProducts([]);
-                }
-                setLoading(false);
-            })
-            .withFailureHandler((error: any) => {
-                console.error('GAS Error:', error);
-                setDebugInfo({ error: error.message, details: "Failed to connect to backend." });
-                setLoading(false);
-            })
-            .getData();
-    } else {
-        const mock = generateMockData();
-        setProducts(mock.products);
-        setTransactions(mock.transactions);
-        setInventory(mock.inventory);
+
+    try {
+        const dbRef = ref(db);
+        const snapshot = await get(child(dbRef, '/'));
+
+        if (snapshot.exists()) {
+            const data = snapshot.val();
+            
+            // 1. Map Inventory Data (from "Inventory Management - Inventory Count Log")
+            const rawInventory = data["Inventory Management - Inventory Count Log"] 
+               ? Object.values(data["Inventory Management - Inventory Count Log"]) 
+               : [];
+               
+            const inventoryArray: InventoryState[] = rawInventory.map((item: any) => ({
+                sku: String(item.SKU),
+                qtyOnHand: safeParseFloat(item.Counted_Qty)
+            }));
+
+            // 2. Map Sales Data (from "Inventory Management - Kampstore Sales")
+            // This file serves as BOTH transactions AND product definitions
+            const rawSales = data["Inventory Management - Kampstore Sales"]
+               ? Object.values(data["Inventory Management - Kampstore Sales"])
+               : [];
+
+            const transactionsArray: Transaction[] = rawSales.map((item: any) => ({
+                id: String(item.Report_UID || Math.random().toString(36)),
+                date: item["Sales Date"] ? new Date(item["Sales Date"]).toISOString().split('T')[0] : "",
+                sku: String(item.SKU),
+                qtySold: safeParseFloat(item["Qty Sold"]),
+                discount: safeParseFloat(item.Discount),
+                property: item.Property || "Unknown"
+            }));
+
+            // 3. Derive Unique Products from Sales Data
+            const uniqueProductsMap = new Map<string, Product>();
+            rawSales.forEach((item: any) => {
+               const sku = String(item.SKU);
+               if (!sku || uniqueProductsMap.has(sku)) return;
+
+               uniqueProductsMap.set(sku, {
+                  sku: sku,
+                  name: item.Item || item["Original Title"] || "Unknown Item",
+                  department: item.Department || "General",
+                  category: item.Category || "Misc",
+                  vendor: (item["Brand_Vendor"] || item["Brand/Vendor"] || "").replace('_', ' '),
+                  cost: safeParseFloat(item["Current Cost"]),
+                  price: safeParseFloat(item["Current Price"])
+               });
+            });
+            const productsArray = Array.from(uniqueProductsMap.values());
+
+            setProducts(productsArray);
+            setTransactions(transactionsArray);
+            setInventory(inventoryArray);
+        } else {
+            console.log("No data available in Firebase");
+            setProducts([]);
+        }
+    } catch (error: any) {
+        console.error("Firebase Error:", error);
+        setDebugInfo({ error: error.message || String(error), details: "Failed to connect to Firebase Realtime Database." });
+    } finally {
         setLoading(false);
     }
   };
@@ -725,7 +720,7 @@ const App = () => {
     };
   }, [transactions, products]);
 
-  // --- FAST LOOKUP MAP (PERFORMANCE FIX) ---
+  // --- FAST LOOKUP MAP ---
   const salesHistoryMap = useMemo(() => {
     const map = new Map<string, number>();
     const relevantTransactions = transactions.filter(t => 
@@ -743,14 +738,24 @@ const App = () => {
     return map;
   }, [transactions, filters.selectedProperty]);
 
-  const analyzedData: AnalysisRow[] = useMemo(() => {
-    if (products.length === 0) return [];
-    
+  // --- PERFORMANCE OPTIMIZATION: GROUP TRANSACTIONS ONCE ---
+  const transactionsBySku = useMemo(() => {
+    const map = new Map<string, Transaction[]>();
     const propertyFilteredTx = transactions.filter(t => 
        filters.selectedProperty === 'All' || t.property === filters.selectedProperty
     );
     const filteredTx = propertyFilteredTx.filter(t => t.date >= filters.dateStart && t.date <= filters.dateEnd);
+    
+    filteredTx.forEach(t => {
+       if (!map.has(t.sku)) map.set(t.sku, []);
+       map.get(t.sku)!.push(t);
+    });
+    return map;
+  }, [transactions, filters.selectedProperty, filters.dateStart, filters.dateEnd]);
 
+  const analyzedData: AnalysisRow[] = useMemo(() => {
+    if (products.length === 0) return [];
+    
     const calculateMetrics = (skus: string[], id: string, name: string, category: string, isGroup: boolean): AnalysisRow => {
       let qtySold = 0;
       let revenue = 0; 
@@ -771,7 +776,8 @@ const App = () => {
 
         totalCost += prod.cost;
 
-        const skuTx = filteredTx.filter(t => t.sku === sku);
+        // Use Pre-filtered Map
+        const skuTx = transactionsBySku.get(sku) || [];
         const skuSold = skuTx.reduce((sum, t) => sum + t.qtySold, 0);
         const skuDiscount = skuTx.reduce((sum, t) => sum + (t.discount || 0), 0);
         
@@ -888,11 +894,19 @@ const App = () => {
     }
 
     let result = rows.filter(r => {
-      const matchSearch = r.name.toLowerCase().includes(filters.search.toLowerCase());
+      const searchTerm = filters.search.toLowerCase();
+      
+      const matchName = filters.searchFields.includes('name') && r.name.toLowerCase().includes(searchTerm);
+      const matchSku = filters.searchFields.includes('sku') && r.id.toLowerCase().includes(searchTerm);
+      const matchVendor = filters.searchFields.includes('vendor') && r.vendor.toLowerCase().includes(searchTerm);
+      const matchCategory = filters.searchFields.includes('category') && r.category.toLowerCase().includes(searchTerm);
+      
+      const matchSearch = matchName || matchSku || matchVendor || matchCategory;
+
       const matchCat = filters.categories.length === 0 || filters.categories.includes(r.category);
       const matchDept = filters.departments.length === 0 || filters.departments.some(d => r.department.includes(d));
-      const matchVendor = filters.vendors.length === 0 || filters.vendors.some(v => r.vendor.includes(v));
-      return matchSearch && matchCat && matchDept && matchVendor;
+      const matchVendorFilter = filters.vendors.length === 0 || filters.vendors.some(v => r.vendor.includes(v));
+      return matchSearch && matchCat && matchDept && matchVendorFilter;
     });
 
     result.sort((a, b) => {
@@ -906,7 +920,7 @@ const App = () => {
     });
 
     return result;
-  }, [products, transactions, inventory, customGroups, filters, salesHistoryMap]);
+  }, [products, transactionsBySku, inventory, customGroups, filters, salesHistoryMap]);
 
   const handleSort = (field: string) => {
      setFilters(prev => ({
@@ -914,6 +928,15 @@ const App = () => {
        sortBy: field as any,
        sortDir: prev.sortBy === field && prev.sortDir === 'desc' ? 'asc' : 'desc'
      }));
+  };
+
+  const handleSearchFieldChange = (field: string) => {
+    setFilters(prev => {
+      const fields = prev.searchFields.includes(field)
+        ? prev.searchFields.filter(f => f !== field)
+        : [...prev.searchFields, field];
+      return { ...prev, searchFields: fields.length > 0 ? fields : ['name'] }; // Ensure at least one field
+    });
   };
 
   const handleSendMessage = async (customPrompt?: string) => {
@@ -946,7 +969,6 @@ const App = () => {
     if (window.google && window.google.script) {
       window.google.script.run
         .withSuccessHandler((response: unknown) => {
-           // FIX: Explicitly cast unknown response to string to satisfy TypeScript
            const responseText = String(response);
            setMessages(prev => [...prev, { role: 'model', text: responseText, timestamp: new Date() }]);
            setIsThinking(false);
@@ -1044,6 +1066,24 @@ const App = () => {
           </div>
           
           <div>
+            <label className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2 block">Date Range</label>
+            <div className="flex flex-col gap-2">
+              <input 
+                type="date" 
+                className="w-full bg-[var(--card-bg)] text-xs border border-[var(--border-color)] rounded p-2 outline-none text-[var(--text-color)] focus:border-[var(--primary-color)]"
+                value={filters.dateStart}
+                onChange={(e) => setFilters(prev => ({...prev, dateStart: e.target.value}))}
+              />
+              <input 
+                type="date" 
+                className="w-full bg-[var(--card-bg)] text-xs border border-[var(--border-color)] rounded p-2 outline-none text-[var(--text-color)] focus:border-[var(--primary-color)]"
+                value={filters.dateEnd}
+                onChange={(e) => setFilters(prev => ({...prev, dateEnd: e.target.value}))}
+              />
+            </div>
+          </div>
+          
+          <div>
             <label className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2 block">Search</label>
             <input 
               type="text" 
@@ -1052,6 +1092,17 @@ const App = () => {
               value={filters.search}
               onChange={(e) => setFilters(prev => ({...prev, search: e.target.value}))}
             />
+            <div className="mt-2 flex flex-wrap gap-2">
+              {['name', 'sku', 'vendor', 'category'].map(field => (
+                <button 
+                  key={field}
+                  onClick={() => handleSearchFieldChange(field)}
+                  className={`text-[10px] px-2 py-1 rounded border capitalize ${filters.searchFields.includes(field) ? 'bg-[var(--primary-color)] text-white border-[var(--primary-color)]' : 'bg-[var(--card-bg)] text-[var(--text-muted)] border-[var(--border-color)]'}`}
+                >
+                  {field}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div>

@@ -1,17 +1,15 @@
-
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createRoot } from 'react-dom/client';
 
 // --- Types ---
 
-// Add global declaration for Google Apps Script
 declare global {
   interface Window {
     google?: {
       script: {
         run: {
           withSuccessHandler: (callback: (data: any, userObject?: any) => void) => {
-             withFailureHandler: (callback: (error: Error, userObject?: any) => void) => {
+             withFailureHandler: (callback: (error: any, userObject?: any) => void) => {
                 getData: () => void;
                 callGeminiAPI: (prompt: string, model: string) => void;
              }
@@ -157,57 +155,8 @@ const DEFAULT_SETTINGS: AppSettings = {
 };
 
 // --- Mock Data ---
-
-const MOCK_PROPERTIES = ['Downtown Store', 'North Mall Kiosk', 'Online Store', 'Westside Warehouse'];
-
-const MOCK_PRODUCTS: Product[] = [
-  { sku: 'EL001', name: 'Wireless Mouse', department: 'Peripherals', category: 'Electronics', vendor: 'LogiTechs', cost: 12, price: 29 },
-  { sku: 'EL002', name: 'Mechanical Keyboard', department: 'Peripherals', category: 'Electronics', vendor: 'LogiTechs', cost: 45, price: 120 },
-  { sku: 'EL003', name: 'USB-C Monitor', department: 'Displays', category: 'Electronics', vendor: 'DisplayPro', cost: 150, price: 350 },
-  { sku: 'FU001', name: 'Ergo Office Chair', department: 'Seating', category: 'Furniture', vendor: 'FurniCo', cost: 180, price: 450 },
-  { sku: 'FU002', name: 'Standing Desk', department: 'Desks', category: 'Furniture', vendor: 'FurniCo', cost: 250, price: 600 },
-  { sku: 'OF001', name: 'Notebook Pack', department: 'Supplies', category: 'Office', vendor: 'OfficeDepot', cost: 5, price: 15 },
-  { sku: 'OF002', name: 'Gel Pen Set', department: 'Supplies', category: 'Office', vendor: 'OfficeDepot', cost: 3, price: 12 },
-];
-
 const generateMockData = () => {
-  const transactions: Transaction[] = [];
-  const inventory: InventoryState[] = [];
-  const now = new Date();
-  
-  MOCK_PRODUCTS.forEach((p, index) => {
-    inventory.push({ sku: p.sku, qtyOnHand: Math.floor(Math.random() * 50) }); 
-    
-    // Simulate property exclusivity: Some items are NOT sold at certain locations
-    // This ensures "No Sales History" logic can be tested
-    const allowedProperties = MOCK_PROPERTIES.filter((_, idx) => (index + idx) % 2 === 0 || idx === 2); // Everyone sells online (idx 2)
-
-    for (let i = 0; i < 1460; i++) {
-      const date = new Date(now);
-      date.setDate(date.getDate() - i);
-      const month = date.getMonth();
-      const isSeason = month === 10 || month === 11; 
-      const chance = isSeason ? 0.7 : 0.4;
-
-      if (Math.random() < chance) {
-         const qty = Math.floor(Math.random() * 5) + 1;
-         const isDiscounted = Math.random() < 0.2;
-         const discount = isDiscounted ? Math.floor((p.price * qty) * 0.1) : 0;
-         
-         const property = allowedProperties[Math.floor(Math.random() * allowedProperties.length)];
-
-         transactions.push({
-           id: Math.random().toString(36).substring(2, 9),
-           date: date.toISOString().split('T')[0],
-           sku: p.sku,
-           qtySold: qty,
-           discount: discount,
-           property: property
-         });
-      }
-    }
-  });
-  return { products: MOCK_PRODUCTS, transactions, inventory };
+  return { products: [], transactions: [], inventory: [] };
 };
 
 // --- Helper Components ---
@@ -282,7 +231,6 @@ const SettingsModal = ({ settings, onSave, onClose }: { settings: AppSettings, o
         </div>
         
         <div className="p-6 overflow-y-auto space-y-8">
-           {/* Appearance */}
            <section>
              <h4 className="text-xs uppercase font-bold text-slate-500 mb-4 border-b border-[var(--border-color)] pb-1">Appearance</h4>
              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -324,7 +272,6 @@ const SettingsModal = ({ settings, onSave, onClose }: { settings: AppSettings, o
              </div>
            </section>
 
-           {/* Dashboard Charts */}
            <section>
              <h4 className="text-xs uppercase font-bold text-slate-500 mb-4 border-b border-[var(--border-color)] pb-1">Dashboard Chart</h4>
              <div className="space-y-3">
@@ -370,6 +317,9 @@ const InventoryCharts = ({ data, settings }: { data: AnalysisRow[], settings: Ap
 
   useEffect(() => {
     if (!data || data.length === 0 || !barChartRef.current) return;
+    // @ts-ignore
+    if (typeof Chart === 'undefined') return;
+
     if (chartInstance.current) chartInstance.current.destroy();
 
     const sorted = [...data].sort((a, b) => b.revenue - a.revenue).slice(0, 10);
@@ -439,7 +389,6 @@ const CalendarView = ({ rows, onCellClick, sortConfig, onSort }: {
   const [selectedMonths, setSelectedMonths] = useState<Set<number>>(new Set());
   const [isInactiveCollapsed, setIsInactiveCollapsed] = useState(true);
 
-  // Split rows into active vs no history
   const activeRows = rows.filter(r => r.hasHistory);
   const inactiveRows = rows.filter(r => !r.hasHistory);
 
@@ -745,7 +694,6 @@ const App = () => {
                     setTransactions(data.transactions || []);
                     setInventory(data.inventory || []);
                 } else if (data && data.debug) {
-                    // Handle server-side debug/error reporting for missing data
                     setDebugInfo(data.debug);
                     setProducts([]);
                 }
@@ -758,7 +706,6 @@ const App = () => {
             })
             .getData();
     } else {
-        console.log("No GAS environment detected. Using mock data.");
         const mock = generateMockData();
         setProducts(mock.products);
         setTransactions(mock.transactions);
@@ -778,15 +725,31 @@ const App = () => {
     };
   }, [transactions, products]);
 
+  // --- FAST LOOKUP MAP (PERFORMANCE FIX) ---
+  const salesHistoryMap = useMemo(() => {
+    const map = new Map<string, number>();
+    const relevantTransactions = transactions.filter(t => 
+       filters.selectedProperty === 'All' || t.property === filters.selectedProperty
+    );
+
+    relevantTransactions.forEach(t => {
+      if (!t.date) return;
+      const d = new Date(t.date);
+      if (isNaN(d.getTime())) return;
+      const key = `${t.sku}_${d.getFullYear()}_${d.getMonth()}`;
+      const current = map.get(key) || 0;
+      map.set(key, current + t.qtySold);
+    });
+    return map;
+  }, [transactions, filters.selectedProperty]);
+
   const analyzedData: AnalysisRow[] = useMemo(() => {
     if (products.length === 0) return [];
     
     const propertyFilteredTx = transactions.filter(t => 
        filters.selectedProperty === 'All' || t.property === filters.selectedProperty
     );
-
     const filteredTx = propertyFilteredTx.filter(t => t.date >= filters.dateStart && t.date <= filters.dateEnd);
-    const allTx = propertyFilteredTx;
 
     const calculateMetrics = (skus: string[], id: string, name: string, category: string, isGroup: boolean): AnalysisRow => {
       let qtySold = 0;
@@ -840,27 +803,27 @@ const App = () => {
       for (let i = 1; i <= 12; i++) {
          const targetDate = new Date(today.getFullYear(), today.getMonth() + i, 1);
          const targetMonth = targetDate.getMonth();
+         const targetYear = targetDate.getFullYear();
          const monthLabel = targetDate.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
 
          let totalHistoricalQty = 0;
          let yearsFound = 0;
-         const targetYear = targetDate.getFullYear();
 
          for (let y = 1; y <= 3; y++) {
              const lookbackYear = targetYear - y;
              let monthlySum = 0;
-             let hasSales = false;
+             let yearHasSales = false;
 
              skus.forEach(sku => {
-                const sales = allTx.filter(t => {
-                   const d = new Date(t.date);
-                   return t.sku === sku && d.getMonth() === targetMonth && d.getFullYear() === lookbackYear;
-                }).reduce((sum, t) => sum + t.qtySold, 0);
-                monthlySum += sales;
-                if(sales > 0) hasSales = true;
+                const key = `${sku}_${lookbackYear}_${targetMonth}`;
+                const qty = salesHistoryMap.get(key) || 0;
+                if (qty > 0) {
+                   monthlySum += qty;
+                   yearHasSales = true;
+                }
              });
 
-             if (hasSales) { 
+             if (yearHasSales) { 
                  totalHistoricalQty += monthlySum;
                  yearsFound++;
              }
@@ -869,7 +832,8 @@ const App = () => {
          if (yearsFound > 0) hasHistory = true;
 
          const historicalAverage = yearsFound > 0 ? totalHistoricalQty / yearsFound : 0;
-         const forecastedDemand = historicalAverage > 0 ? Math.ceil(historicalAverage * 1.05) : Math.ceil(qtySold / 3);
+         const avgRunRate = qtySold / 3; 
+         const forecastedDemand = historicalAverage > 0 ? Math.ceil(historicalAverage * 1.05) : Math.ceil(avgRunRate);
 
          const nextMonthDemand = forecastedDemand; 
          const targetStock = nextMonthDemand; 
@@ -942,7 +906,7 @@ const App = () => {
     });
 
     return result;
-  }, [products, transactions, inventory, customGroups, filters]);
+  }, [products, transactions, inventory, customGroups, filters, salesHistoryMap]);
 
   const handleSort = (field: string) => {
      setFilters(prev => ({
@@ -961,7 +925,7 @@ const App = () => {
     if (!customPrompt) setInputMessage('');
     setIsThinking(true);
 
-    let finalPrompt = text;
+    let finalPrompt: string = text;
     if (detailModal && text.includes("EXPLAIN_CELL")) {
          const dm = detailModal;
          finalPrompt = `
@@ -981,12 +945,14 @@ const App = () => {
 
     if (window.google && window.google.script) {
       window.google.script.run
-        .withSuccessHandler((responseText: string) => {
+        .withSuccessHandler((response: unknown) => {
+           // Explicitly cast the unknown response to string
+           const responseText = String(response);
            setMessages(prev => [...prev, { role: 'model', text: responseText, timestamp: new Date() }]);
            setIsThinking(false);
         })
         .withFailureHandler((error: any) => {
-           let errorMsg = "Error: " + error.message;
+           let errorMsg = "Error: " + (error?.message || String(error));
            if (errorMsg.includes("API Key Missing") || errorMsg.includes("API key not valid")) {
                errorMsg = "⚠️ Configuration Error: The Gemini API Key is missing or invalid. Please check the Apps Script 'Script Properties'.";
            }

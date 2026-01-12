@@ -5,7 +5,7 @@ import { generateMockData, MOCK_PRODUCTS } from './utils/mockData';
 import { Button, Card, HeaderWithInfo } from './components/ui';
 import { SettingsModal, MigrationModal, CellDetailModal } from './components/modals';
 import { FilterPanel } from './components/FilterPanel';
-import { CalendarView } from './components/CalendarView';
+import { OutlierReview } from './components/OutlierReview';
 import { AppSettings, DEFAULT_SETTINGS, FilterState, AnalysisRow, Product, Transaction, InventoryState, CellLogic, ChatMessage } from './types';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend } from 'chart.js';
 import { Bar } from 'react-chartjs-2';
@@ -13,7 +13,7 @@ import { Bar } from 'react-chartjs-2';
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
 const App = () => {
-    const [view, setView] = useState<'dashboard' | 'calendar'>('dashboard');
+    const [view, setView] = useState<'dashboard'>('dashboard');
     const [products, setProducts] = useState<Product[]>([]);
     const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [inventory, setInventory] = useState<InventoryState[]>([]);
@@ -36,7 +36,7 @@ const App = () => {
         selectedProperty: 'All',
         sortBy: 'revenue',
         sortDir: 'desc',
-        showColumns: { sold: true, revenue: false, profit: true, onHand: true, demand: true, reorder: true }
+        showColumns: { sold: true, grossRevenue: false, discounts: false, revenue: true, profit: true, onHand: true, reorder: true }
     });
 
     const [draftFilters, setDraftFilters] = useState(filters);
@@ -59,6 +59,24 @@ const App = () => {
     const [isThinking, setIsThinking] = useState(false);
     const chatEndRef = useRef<HTMLDivElement>(null);
     const [model, setModel] = useState('gemini-3-flash-preview');
+    const [isColumnSelectorOpen, setIsColumnSelectorOpen] = useState(false);
+
+    // Outlier Review State
+    const [isOutlierReviewOpen, setIsOutlierReviewOpen] = useState(false);
+
+    const handleUpdateTransaction = (id: string, updates: Partial<Transaction>) => {
+        setTransactions(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
+    };
+
+    const outlierCount = useMemo(() => {
+        return transactions.filter(t => {
+            if (t.review_status === 'verified' || t.review_status === 'ignored') return false;
+            const p = products.find(prod => prod.sku === t.sku);
+            const cost = t.unit_cost_sold || p?.cost || 0;
+            const revenue = (t.qtySold * (t.unit_price_sold || p?.price || 0)) - (t.discount || 0);
+            return t.qtySold > 500 || (revenue < t.qtySold * cost && revenue > 0) || (cost === 0 && revenue > 10) || revenue > 5000;
+        }).length;
+    }, [transactions, products]);
 
     // Pagination for Dashboard Table
     const [dashboardPage, setDashboardPage] = useState(1);
@@ -85,22 +103,58 @@ const App = () => {
         try {
             const conn = await checkSupabaseConnection();
             if (conn.success && (conn.count || 0) > 0) {
-                console.log("Supabase has data. Fetching full dataset...");
-                const [resProducts, resInventory, resTransactions] = await Promise.all([
-                    supabase.from('products').select('*'),
-                    supabase.from('inventory').select('*'),
-                    supabase.from('transactions').select('*')
-                ]);
-                if (resProducts.error) throw resProducts.error;
-                if (resInventory.error) throw resInventory.error;
-                if (resTransactions.error) throw resTransactions.error;
+                console.log("Supabase has data. Fetching full dataset in batches...");
 
-                const sbProducts: Product[] = resProducts.data.map(p => ({
+                const fetchAll = async (table: string) => {
+                    let allData: any[] = [];
+                    let lastId = 0;
+                    let hasMore = true;
+                    let page = 0;
+                    const batchSize = 1000;
+
+                    while (hasMore) {
+                        const { data, error } = await supabase
+                            .from(table)
+                            .select('*')
+                            .range(page * batchSize, (page + 1) * batchSize - 1);
+
+                        if (error) throw error;
+                        if (!data || data.length === 0) {
+                            hasMore = false;
+                        } else {
+                            allData = [...allData, ...data];
+                            if (data.length < batchSize) hasMore = false;
+                            page++;
+                        }
+                    }
+                    return allData;
+                };
+
+                const [resProducts, resInventory, resTransactions] = await Promise.all([
+                    fetchAll('products'),
+                    fetchAll('inventory'),
+                    fetchAll('transactions')
+                ]);
+
+                const sbProducts: Product[] = resProducts.map(p => ({
                     sku: p.sku, name: p.name, department: p.department || '', category: p.category, vendor: p.vendor || '', cost: Number(p.cost) || 0, price: Number(p.price) || 0
                 }));
-                const sbInventory: InventoryState[] = resInventory.data.map(i => ({ sku: i.sku, qtyOnHand: Number(i.qty_on_hand) || 0 }));
-                const sbTransactions: Transaction[] = resTransactions.data.map(t => ({
-                    id: t.id || Math.random().toString(), date: t.date, sku: t.sku, qtySold: Number(t.qty_sold) || 0, discount: Number(t.discount) || 0, property: t.property || 'Default'
+                const sbInventory: InventoryState[] = resInventory.map(i => ({
+                    sku: i.sku,
+                    qtyOnHand: Number(i.qty_on_hand) || 0,
+                    property: i.property,
+                    lastCounted: i.last_counted
+                }));
+                const sbTransactions: Transaction[] = resTransactions.map(t => ({
+                    id: t.id || Math.random().toString(),
+                    date: t.date,
+                    sku: t.sku,
+                    qtySold: Number(t.qty_sold) || 0,
+                    discount: Number(t.discount) || 0,
+                    property: t.property || 'Default',
+                    unit_price_sold: Number(t.unit_price_sold) || 0,
+                    unit_cost_sold: Number(t.unit_cost_sold) || 0,
+                    review_status: t.review_status || 'pending'
                 }));
 
                 setProducts(sbProducts); setInventory(sbInventory); setTransactions(sbTransactions);
@@ -163,8 +217,13 @@ const App = () => {
         // Grouping Maps
         const txBySku = new Map<string, Transaction[]>();
         filteredTx.forEach(t => { if (!txBySku.has(t.sku)) txBySku.set(t.sku, []); txBySku.get(t.sku)!.push(t); });
-        const invBySku = new Map<string, number>();
-        inventory.forEach(i => invBySku.set(i.sku, i.qtyOnHand));
+
+        // Inventory Index: Map<SKU, Map<Property, qty>>
+        const invIndex = new Map<string, Map<string, number>>();
+        inventory.forEach(i => {
+            if (!invIndex.has(i.sku)) invIndex.set(i.sku, new Map());
+            if (i.property) invIndex.get(i.sku)!.set(i.property, i.qtyOnHand);
+        });
 
         const calculateMetrics = (skus: string[], id: string, name: string, category: string, isGroup: boolean): AnalysisRow => {
             let qtySold = 0, revenue = 0, profit = 0, discounts = 0, productCost = 0, qtyOnHand = 0;
@@ -175,7 +234,16 @@ const App = () => {
                 if (!p) return;
                 vendorSet.add(p.vendor); deptSet.add(p.department);
                 productCost += p.cost;
-                qtyOnHand += (invBySku.get(sku) || 0);
+
+                // Aggregate Inventory Based on Filter
+                if (filters.selectedProperty === 'All') {
+                    const skuInv = invIndex.get(sku);
+                    if (skuInv) {
+                        skuInv.forEach(qty => qtyOnHand += qty);
+                    }
+                } else {
+                    qtyOnHand += (invIndex.get(sku)?.get(filters.selectedProperty) || 0);
+                }
 
                 const txs = txBySku.get(sku) || [];
                 txs.forEach(t => {
@@ -228,7 +296,9 @@ const App = () => {
             const matchSearch = !searchLower ||
                 r.name.toLowerCase().includes(searchLower) ||
                 r.skus.some(s => s.toLowerCase().includes(searchLower)) ||
-                r.vendor.toLowerCase().includes(searchLower);
+                r.vendor.toLowerCase().includes(searchLower) ||
+                r.category.toLowerCase().includes(searchLower) ||
+                r.department.toLowerCase().includes(searchLower);
 
             const matchCat = filters.categories.length === 0 || filters.categories.includes(r.category);
             const matchDept = filters.departments.length === 0 || filters.departments.some(d => r.department.includes(d));
@@ -395,8 +465,13 @@ const App = () => {
                         <button onClick={loadServerData} className="w-full bg-[var(--card-bg)] hover:bg-[var(--border-color)] text-xs py-1.5 rounded border border-[var(--border-color)] transition-colors"><i className="fa-solid fa-sync mr-1"></i> Refresh</button>
                     </div>
 
-                    {/* Filters */}
+
                     <div>
+                        <button onClick={() => setIsOutlierReviewOpen(true)} className="w-full flex items-center justify-between px-3 py-2 text-xs bg-amber-500/10 text-amber-500 border border-amber-500/20 rounded hover:bg-amber-500/20 transition-colors mb-4">
+                            <span className="font-bold"><i className="fa-solid fa-stethoscope mr-2"></i> Data Health</span>
+                            {outlierCount > 0 && <span className="bg-amber-500 text-black px-1.5 rounded-full text-[10px] font-bold">{outlierCount}</span>}
+                        </button>
+
                         <label className="text-xs font-semibold text-[var(--text-muted)] uppercase mb-2 block">Store</label>
                         <select value={filters.selectedProperty} onChange={e => setFilters(p => ({ ...p, selectedProperty: e.target.value }))} className="w-full bg-[var(--card-bg)] text-xs border border-[var(--border-color)] rounded p-2 outline-none">
                             <option value="All">All Locations</option>
@@ -448,67 +523,124 @@ const App = () => {
                 </header>
 
                 <div className="flex-1 overflow-auto p-6">
-                    {view === 'dashboard' ? (
-                        <Card className="h-full overflow-hidden flex flex-col p-0 bg-[var(--app-bg)]">
-                            <div className="overflow-auto flex-1">
-                                <table className="w-full text-left border-collapse">
-                                    <div className="p-2 border-b border-[var(--border-color)] flex justify-end">
-                                        <div className="relative group">
-                                            <button className="text-xs bg-[var(--card-bg)] border border-[var(--border-color)] px-2 py-1 rounded hover:bg-[var(--primary-color)] hover:text-white transition-colors"><i className="fa-solid fa-table-columns mr-1"></i> Columns</button>
-                                            <div className="absolute right-0 top-full mt-1 w-40 bg-[var(--card-bg)] border border-[var(--border-color)] shadow-xl rounded p-2 hidden group-hover:block z-50">
-                                                {Object.keys(filters.showColumns).map(col => (
-                                                    <label key={col} className="flex items-center gap-2 text-xs p-1 hover:bg-[var(--app-bg)] cursor-pointer">
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={filters.showColumns[col as keyof typeof filters.showColumns]}
-                                                            onChange={() => setFilters(p => ({ ...p, showColumns: { ...p.showColumns, [col]: !p.showColumns[col as keyof typeof filters.showColumns] } }))}
-                                                        />
-                                                        <span className="capitalize">{col}</span>
-                                                    </label>
-                                                ))}
-                                            </div>
+                    <Card className="h-full overflow-hidden flex flex-col p-0 bg-[var(--app-bg)]">
+                        {/* Column Selector */}
+                        <div className="p-2 border-b border-[var(--border-color)] flex justify-end">
+                            <div className="relative">
+                                <button
+                                    onClick={() => setIsColumnSelectorOpen(!isColumnSelectorOpen)}
+                                    className="text-xs bg-[var(--card-bg)] border border-[var(--border-color)] px-2 py-1 rounded hover:bg-[var(--primary-color)] hover:text-white transition-colors"
+                                >
+                                    <i className="fa-solid fa-table-columns mr-1"></i> Columns
+                                </button>
+                                {isColumnSelectorOpen && (
+                                    <>
+                                        <div className="fixed inset-0 z-40" onClick={() => setIsColumnSelectorOpen(false)}></div>
+                                        <div className="absolute right-0 top-full mt-1 w-40 bg-[var(--card-bg)] border border-[var(--border-color)] shadow-xl rounded p-2 z-50">
+                                            {Object.keys(filters.showColumns).map(col => (
+                                                <label key={col} className="flex items-center gap-2 text-xs p-1 hover:bg-[var(--app-bg)] cursor-pointer">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={filters.showColumns[col as keyof typeof filters.showColumns]}
+                                                        onChange={() => setFilters(p => ({ ...p, showColumns: { ...p.showColumns, [col]: !p.showColumns[col as keyof typeof filters.showColumns] } }))}
+                                                    />
+                                                    <span className="capitalize">{col}</span>
+                                                </label>
+                                            ))}
                                         </div>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Summary Bar */}
+                        <div className="bg-[var(--app-bg)] border-b-2 border-[var(--primary-color)] p-3">
+                            <div className="flex items-center justify-between">
+                                <div className="text-xs font-semibold text-[var(--text-muted)] uppercase">Filtered Totals:</div>
+                                <div className="flex gap-6 text-sm">
+                                    <div className="flex flex-col items-end">
+                                        <span className="text-[10px] text-[var(--text-muted)] uppercase">Qty Sold</span>
+                                        <span className="font-mono font-bold">{analyzedData.reduce((sum, row) => sum + row.qtySold, 0).toLocaleString()}</span>
                                     </div>
-                                    <thead className="bg-[var(--sidebar-bg)] sticky top-0 z-10 text-xs uppercase font-semibold text-[var(--text-muted)]">
-                                        <tr>
-                                            <HeaderWithInfo label="Item Name" sortable onSort={() => handleSort('name')} currentSort={filters.sortBy === 'name'} currentDir={filters.sortDir} infoQuery="Product Name" />
-                                            <HeaderWithInfo label="Category" infoQuery="Product Category" />
-                                            {filters.showColumns.sold && <HeaderWithInfo label="Sold" className="text-right" sortable onSort={() => handleSort('qtySold')} currentSort={filters.sortBy === 'qtySold'} currentDir={filters.sortDir} infoQuery="Units Sold" />}
-                                            {filters.showColumns.revenue && <HeaderWithInfo label="Revenue" className="text-right" sortable onSort={() => handleSort('revenue')} currentSort={filters.sortBy === 'revenue'} currentDir={filters.sortDir} infoQuery="Net Revenue" />}
-                                            {filters.showColumns.profit && <HeaderWithInfo label="Profit" className="text-right" sortable onSort={() => handleSort('profit')} currentSort={filters.sortBy === 'profit'} currentDir={filters.sortDir} infoQuery="Gross Profit" />}
-                                            {filters.showColumns.onHand && <HeaderWithInfo label="On Hand" className="text-right" infoQuery="Current Inventory" />}
-                                            {filters.showColumns.reorder && <HeaderWithInfo label="Restock?" className="text-right" sortable onSort={() => handleSort('suggestedReorder')} currentSort={filters.sortBy === 'suggestedReorder'} currentDir={filters.sortDir} infoQuery="Suggested Order" />}
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-[var(--border-color)] bg-[var(--card-bg)]">
-                                        {paginatedDashboardRows.map(row => (
-                                            <tr key={row.id} className="hover:bg-[var(--app-bg)]/50 transition-colors">
-                                                <td className="px-4 py-3 font-medium">{row.name}<div className="text-[10px] text-[var(--text-muted)]">{row.vendor}</div></td>
-                                                <td className="px-4 py-3"><span className="bg-[var(--app-bg)] px-2 py-0.5 rounded text-xs">{row.category}</span></td>
-                                                {filters.showColumns.sold && <td className="px-4 py-3 text-right font-mono">{row.qtySold}</td>}
-                                                {filters.showColumns.revenue && <td className="px-4 py-3 text-right font-mono text-blue-300">${row.revenue.toLocaleString()}</td>}
-                                                {filters.showColumns.profit && <td className="px-4 py-3 text-right font-mono text-emerald-400 font-bold">${row.profit.toLocaleString()}</td>}
-                                                {filters.showColumns.onHand && <td className="px-4 py-3 text-right font-mono">{row.qtyOnHand}</td>}
-                                                {filters.showColumns.reorder && <td className="px-4 py-3 text-right">{row.suggestedReorder > 0 ? <span className="bg-red-900/30 text-red-400 border border-red-900/50 px-2 py-0.5 rounded text-xs font-bold">+{Math.ceil(row.suggestedReorder)}</span> : <span className="text-slate-600">-</span>}</td>}
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                            <div className="bg-[var(--sidebar-bg)] border-t border-[var(--border-color)] p-4 flex justify-between items-center text-sm sticky bottom-0 z-30">
-                                <div className="flex items-center gap-4">
-                                    <Button variant="secondary" onClick={() => setDashboardPage(p => Math.max(1, p - 1))} disabled={dashboardPage === 1}>Previous</Button>
-                                    <span className="text-[var(--text-muted)]">Page {dashboardPage} of {dashboardTotalPages}</span>
-                                    <Button variant="secondary" onClick={() => setDashboardPage(p => Math.min(dashboardTotalPages, p + 1))} disabled={dashboardPage === dashboardTotalPages}>Next</Button>
+                                    <div className="flex flex-col items-end">
+                                        <span className="text-[10px] text-[var(--text-muted)] uppercase">Gross Revenue</span>
+                                        <span className="font-mono font-bold text-sky-300">${analyzedData.reduce((sum, row) => sum + row.grossRevenue, 0).toLocaleString()}</span>
+                                    </div>
+                                    <div className="flex flex-col items-end">
+                                        <span className="text-[10px] text-[var(--text-muted)] uppercase">Discounts</span>
+                                        <span className="font-mono font-bold text-orange-400">-${analyzedData.reduce((sum, row) => sum + row.discounts, 0).toLocaleString()}</span>
+                                    </div>
+                                    <div className="flex flex-col items-end">
+                                        <span className="text-[10px] text-[var(--text-muted)] uppercase">Net Revenue</span>
+                                        <span className="font-mono font-bold text-blue-300">${analyzedData.reduce((sum, row) => sum + row.revenue, 0).toLocaleString()}</span>
+                                    </div>
+                                    <div className="flex flex-col items-end">
+                                        <span className="text-[10px] text-[var(--text-muted)] uppercase">Profit</span>
+                                        <span className="font-mono font-bold text-emerald-400">${analyzedData.reduce((sum, row) => sum + row.profit, 0).toLocaleString()}</span>
+                                    </div>
+                                    <div className="flex flex-col items-end">
+                                        <span className="text-[10px] text-[var(--text-muted)] uppercase">On Hand</span>
+                                        <span className="font-mono font-bold">{analyzedData.reduce((sum, row) => sum + row.qtyOnHand, 0).toLocaleString()}</span>
+                                    </div>
+                                    <div className="flex flex-col items-end">
+                                        <span className="text-[10px] text-[var(--text-muted)] uppercase">Inventory Cost</span>
+                                        <span className="font-mono font-bold text-purple-400">${analyzedData.reduce((sum, row) => {
+                                            const skus = row.skus || [row.id];
+                                            const inventoryCost = skus.reduce((skuSum, sku) => {
+                                                const product = products.find(p => p.sku === sku);
+                                                const qty = filters.selectedProperty === 'All'
+                                                    ? inventory.filter(i => i.sku === sku).reduce((total, i) => total + i.qtyOnHand, 0)
+                                                    : inventory.find(i => i.sku === sku && i.property === filters.selectedProperty)?.qtyOnHand || 0;
+                                                return skuSum + (qty * (product?.cost || 0));
+                                            }, 0);
+                                            return sum + inventoryCost;
+                                        }, 0).toLocaleString()}</span>
+                                    </div>
                                 </div>
-                                <div className="text-[var(--text-muted)] text-xs">Showing {paginatedDashboardRows.length} items</div>
                             </div>
-                        </Card>
-                    ) : (
-                        <Card className="p-0 border-0 shadow-xl overflow-hidden bg-[var(--app-bg)] h-full flex flex-col relative">
-                            <CalendarView rows={view === 'calendar' ? forecastData : analyzedData} onCellClick={(r, c) => setDetailModal({ row: r, cell: c })} sortConfig={{ sortBy: filters.sortBy, sortDir: filters.sortDir }} onSort={handleSort} />
-                        </Card>
-                    )}
+                        </div>
+
+                        <div className="overflow-auto flex-1">
+                            <table className="w-full text-left border-collapse">
+                                <thead className="bg-[var(--sidebar-bg)] sticky top-0 z-10 text-xs uppercase font-semibold text-[var(--text-muted)]">
+                                    <tr>
+                                        <HeaderWithInfo label="Item Name" sortable onSort={() => handleSort('name')} currentSort={filters.sortBy === 'name'} currentDir={filters.sortDir} infoQuery="Product Name" />
+                                        <HeaderWithInfo label="Category" infoQuery="Product Category" />
+                                        {filters.showColumns.sold && <HeaderWithInfo label="Sold" className="text-right" sortable onSort={() => handleSort('qtySold')} currentSort={filters.sortBy === 'qtySold'} currentDir={filters.sortDir} infoQuery="Units Sold" />}
+                                        {filters.showColumns.grossRevenue && <HeaderWithInfo label="Gross Revenue" className="text-right" sortable onSort={() => handleSort('grossRevenue')} currentSort={filters.sortBy === 'grossRevenue'} currentDir={filters.sortDir} infoQuery="Total before discounts" />}
+                                        {filters.showColumns.discounts && <HeaderWithInfo label="Discounts" className="text-right" sortable onSort={() => handleSort('discounts')} currentSort={filters.sortBy === 'discounts'} currentDir={filters.sortDir} infoQuery="Total discounts applied" />}
+                                        {filters.showColumns.revenue && <HeaderWithInfo label="Net Revenue" className="text-right" sortable onSort={() => handleSort('revenue')} currentSort={filters.sortBy === 'revenue'} currentDir={filters.sortDir} infoQuery="Revenue after discounts" />}
+                                        {filters.showColumns.profit && <HeaderWithInfo label="Profit" className="text-right" sortable onSort={() => handleSort('profit')} currentSort={filters.sortBy === 'profit'} currentDir={filters.sortDir} infoQuery="Gross Profit" />}
+                                        {filters.showColumns.onHand && <HeaderWithInfo label="On Hand" className="text-right" infoQuery="Current Inventory" />}
+                                        {filters.showColumns.reorder && <HeaderWithInfo label="Restock?" className="text-right" sortable onSort={() => handleSort('suggestedReorder')} currentSort={filters.sortBy === 'suggestedReorder'} currentDir={filters.sortDir} infoQuery="Suggested Order" />}
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-[var(--border-color)] bg-[var(--card-bg)]">
+                                    {paginatedDashboardRows.map(row => (
+                                        <tr key={row.id} className="hover:bg-[var(--app-bg)]/50 transition-colors">
+                                            <td className="px-4 py-3 font-medium">{row.name}<div className="text-[10px] text-[var(--text-muted)]">{row.vendor}</div></td>
+                                            <td className="px-4 py-3"><span className="bg-[var(--app-bg)] px-2 py-0.5 rounded text-xs">{row.category}</span></td>
+                                            {filters.showColumns.sold && <td className="px-4 py-3 text-right font-mono">{row.qtySold}</td>}
+                                            {filters.showColumns.grossRevenue && <td className="px-4 py-3 text-right font-mono text-sky-300">${row.grossRevenue.toLocaleString()}</td>}
+                                            {filters.showColumns.discounts && <td className="px-4 py-3 text-right font-mono text-orange-400">-${row.discounts.toLocaleString()}</td>}
+                                            {filters.showColumns.revenue && <td className="px-4 py-3 text-right font-mono text-blue-300">${row.revenue.toLocaleString()}</td>}
+                                            {filters.showColumns.profit && <td className="px-4 py-3 text-right font-mono text-emerald-400 font-bold">${row.profit.toLocaleString()}</td>}
+                                            {filters.showColumns.onHand && <td className="px-4 py-3 text-right font-mono">{row.qtyOnHand}</td>}
+                                            {filters.showColumns.reorder && <td className="px-4 py-3 text-right">{row.suggestedReorder > 0 ? <span className="bg-red-900/30 text-red-400 border border-red-900/50 px-2 py-0.5 rounded text-xs font-bold">+{Math.ceil(row.suggestedReorder)}</span> : <span className="text-slate-600">-</span>}</td>}
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                        <div className="bg-[var(--sidebar-bg)] border-t border-[var(--border-color)] p-4 flex justify-between items-center text-sm sticky bottom-0 z-30">
+                            <div className="flex items-center gap-4">
+                                <Button variant="secondary" onClick={() => setDashboardPage(p => Math.max(1, p - 1))} disabled={dashboardPage === 1}>Previous</Button>
+                                <span className="text-[var(--text-muted)]">Page {dashboardPage} of {dashboardTotalPages}</span>
+                                <Button variant="secondary" onClick={() => setDashboardPage(p => Math.min(dashboardTotalPages, p + 1))} disabled={dashboardPage === dashboardTotalPages}>Next</Button>
+                            </div>
+                            <div className="text-[var(--text-muted)] text-xs">Showing {paginatedDashboardRows.length} items</div>
+                        </div>
+                    </Card>
                 </div>
             </main>
 
@@ -531,6 +663,7 @@ const App = () => {
             {isSettingsOpen && <SettingsModal settings={settings} onSave={(s) => { setSettings(s); setIsSettingsOpen(false); }} onClose={() => setIsSettingsOpen(false)} onMigrate={() => setIsMigrationOpen(true)} />}
             {isMigrationOpen && <MigrationModal data={{ products, transactions, inventory }} onClose={() => setIsMigrationOpen(false)} />}
             {detailModal && <CellDetailModal row={detailModal.row} cell={detailModal.cell} onClose={() => setDetailModal(null)} onAiExplain={() => handleSendMessage("EXPLAIN_CELL")} isThinking={isThinking} />}
+            {isOutlierReviewOpen && <OutlierReview transactions={transactions} products={products} onClose={() => setIsOutlierReviewOpen(false)} onUpdateTransaction={handleUpdateTransaction} />}
 
             {/* Debug Overlay */}
             {debugInfo && (

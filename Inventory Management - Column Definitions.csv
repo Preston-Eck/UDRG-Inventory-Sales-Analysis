@@ -1,0 +1,36 @@
+Inventory Management - Kampstore Sales (1).csv column definitions:,
+,
+Column Header,Definition
+Report_UID,Unique ID assigned by script importing the data from our POS.
+Property,Property where the transaction took place. 
+Sales Date,Date the transaction occurred
+Department,Store Department for reporting purposes
+Original Title,Item name as it is in our POS
+Type,"Item type imported from our POS, this is irrelevant for our purposes"
+SKU,The item SKU
+Retail Channel,"How the sale was made. I'm not really interested in this right now, the information may prove useful later. "
+Qty Sold,Quantity of that item sold during that transaction. 
+Gross Sales,"Total price, before discounts, of the item(s) sold."
+Discount,Amount discounted off of the Gross Sales
+Net Revenue,Gross Sales Minus Discounts
+Current Price,What price the item was sold for at the time of the transaction. 
+Current Cost,What it cost to purchase the item for inventory at the time of the transaction. 
+Margin,Caclulated profit margin. 
+Average Price,"POS calculated value, ignore."
+Last Sales Date,"Should match the sales date, ignore. "
+Category,Extracted from the original title as a way to group items together for reporting purposes. 
+Brand/Vendor,Extracted from the original title as a way to group items together for reporting purposes. 
+Item,Extracted from the original title as a way to group items together for reporting purposes. 
+,
+Inventory Management - Inventory Count Log (1).csv column definitions:,
+,
+Column Header,Definition
+Count_UID,Unique ID assigned to that inventory count log
+Count_Timestamp,Timestamp for when the item was counted
+Property,"Property where the item was counted, Should match ""Property""  in Inventory Management - Kampstore Sales (1).csv"
+SKU,"The item SKU, should match ""SKU""  in Inventory Management - Kampstore Sales (1).csv"
+Item Name,"Item Name, should match ""Original Title"" in Inventory Management - Kampstore Sales (1).csv"
+Department,"Store Department for reporting purposes, should match ""Department"" in Inventory Management - Kampstore Sales (1).csv"
+Counted_Qty,"Quantity of item in inventory at time of log. For each SKU at at each Property, only the most recent value matters for current status, all other values can be ignored unless reporting early dates or historical trends. "
+Counted_By,ID of employee that counted the inventory for that log. 
+Notes,"Notes, if any, provided by the employee that entered the log. "

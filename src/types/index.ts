@@ -33,11 +33,16 @@ export interface Transaction {
     qtySold: number;
     discount?: number;
     property: string;
+    unit_price_sold?: number;
+    unit_cost_sold?: number;
+    review_status?: 'pending' | 'verified' | 'ignored' | 'modified';
 }
 
 export interface InventoryState {
     sku: string;
     qtyOnHand: number;
+    property?: string;
+    lastCounted?: string;
 }
 
 export interface CellLogic {
@@ -86,6 +91,8 @@ export interface FilterState {
     sortDir: 'asc' | 'desc';
     showColumns: {
         sold: boolean;
+        grossRevenue: boolean;
+        discounts: boolean;
         revenue: boolean;
         profit: boolean;
         onHand: boolean;

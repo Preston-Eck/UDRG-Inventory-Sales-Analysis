@@ -6,7 +6,22 @@ import { fileURLToPath } from 'url';
 
 // --- Configuration ---
 const SUPABASE_URL = "https://ymtbyohlbuyflokcdpkl.supabase.co";
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "YOUR_SERVICE_ROLE_KEY"; // Service Role Key
+
+// Manual .env parser
+if (fs.existsSync('.env')) {
+    const envFile = fs.readFileSync('.env', 'utf8');
+    envFile.split('\n').forEach(line => {
+        const [key, ...value] = line.split('=');
+        if (key && value) process.env[key.trim()] = value.join('=').trim();
+    });
+}
+
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+if (!SUPABASE_KEY) {
+    console.error("Missing SUPABASE_SERVICE_ROLE_KEY in .env");
+    process.exit(1);
+}
 
 // Files
 const SALES_CSV = "Inventory Management - Kampstore Sales (1).csv";
@@ -138,15 +153,22 @@ async function migrateSales() {
             }
         }
 
+
+
         // Calculate Discount to force Revenue match
         // App Logic: Revenue = (Qty * Price) - Discount
         // Desired: Revenue = NetRevenue
         // Discount = (Qty * Price) - NetRevenue
-        const expectedGross = qty * price;
+        // NOTE: For historical accuracy, we should use the Price AT TIME OF SALE if available.
+        // The CSV "Current Price" is actually the price at the time of sale for that row.
+        const salePrice = price;
+        const saleCost = cost;
+
+        const expectedGross = qty * salePrice;
         let discount = expectedGross - netRevenue;
 
         // Sanity check discount
-        if (discount < 0) discount = 0; // Net > Gross? maybe price changed. ignore.
+        if (discount < 0) discount = 0;
 
         transactions.push({
             id: row['Report_UID'] || `gen-${Math.random().toString(36).substr(2, 9)}`,
@@ -154,7 +176,9 @@ async function migrateSales() {
             date: row['Sales Date'],
             qty_sold: Math.round(qty),
             property: row['Property'] || 'Default',
-            discount: parseFloat(discount.toFixed(2)) // Repurposing discount to ensure match
+            discount: parseFloat(discount.toFixed(2)),
+            unit_price_sold: salePrice,
+            unit_cost_sold: saleCost
         });
     }
 

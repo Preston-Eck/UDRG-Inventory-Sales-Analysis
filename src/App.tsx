@@ -65,9 +65,11 @@ const App = () => {
 
     useEffect(() => {
         const today = new Date();
-        const ninetyDaysAgo = new Date();
-        ninetyDaysAgo.setDate(today.getDate() - 90);
-        const start = ninetyDaysAgo.toISOString().split('T')[0];
+        // Default to a wide range to ensure 2025 data is visible
+        // const ninetyDaysAgo = new Date();
+        // ninetyDaysAgo.setDate(today.getDate() - 90);
+        // const start = ninetyDaysAgo.toISOString().split('T')[0];
+        const start = '2025-01-01'; // Fixed start date to capture historical CSV data
         const end = today.toISOString().split('T')[0];
 
         setFilters(prev => ({ ...prev, dateStart: start, dateEnd: end }));
@@ -93,11 +95,11 @@ const App = () => {
                 if (resTransactions.error) throw resTransactions.error;
 
                 const sbProducts: Product[] = resProducts.data.map(p => ({
-                    sku: p.sku, name: p.name, department: p.department || '', category: p.category, vendor: p.vendor || '', cost: p.cost, price: p.price
+                    sku: p.sku, name: p.name, department: p.department || '', category: p.category, vendor: p.vendor || '', cost: Number(p.cost) || 0, price: Number(p.price) || 0
                 }));
-                const sbInventory: InventoryState[] = resInventory.data.map(i => ({ sku: i.sku, qtyOnHand: i.qty_on_hand }));
+                const sbInventory: InventoryState[] = resInventory.data.map(i => ({ sku: i.sku, qtyOnHand: Number(i.qty_on_hand) || 0 }));
                 const sbTransactions: Transaction[] = resTransactions.data.map(t => ({
-                    id: t.id || Math.random().toString(), date: t.date, sku: t.sku, qtySold: t.qty_sold, discount: t.discount, property: t.property || 'Default'
+                    id: t.id || Math.random().toString(), date: t.date, sku: t.sku, qtySold: Number(t.qty_sold) || 0, discount: Number(t.discount) || 0, property: t.property || 'Default'
                 }));
 
                 setProducts(sbProducts); setInventory(sbInventory); setTransactions(sbTransactions);
@@ -107,9 +109,18 @@ const App = () => {
 
         if (window.google && window.google.script) {
             window.google.script.run.withSuccessHandler((data: any) => {
-                if (data?.products?.length > 0) {
-                    setProducts(data.products); setTransactions(data.transactions || []); setInventory(data.inventory || []);
-                } else if (data?.debug) { setDebugInfo(data.debug); setProducts([]); }
+                // Check if ANY data returned, or if explicit debug info exists
+                if (data && (data.products?.length > 0 || data.transactions?.length > 0 || data.inventory?.length > 0)) {
+                    console.log("GAS Data Received:", data);
+                    setProducts(data.products || []);
+                    setTransactions(data.transactions || []);
+                    setInventory(data.inventory || []);
+                } else {
+                    // Force debug display if we got here (empty data)
+                    const errorMsg = data?.debug ? null : "Received empty data structure from GAS.";
+                    setDebugInfo(data?.debug || { error: errorMsg, logs: ["Full Data Object is empty or missing arrays."] });
+                    setProducts([]);
+                }
                 setLoading(false);
             }).withFailureHandler((error: any) => {
                 console.error('GAS Error:', error); setDebugInfo({ error: error.message, details: "Failed to connect." }); setLoading(false);
@@ -430,6 +441,20 @@ const App = () => {
             {isSettingsOpen && <SettingsModal settings={settings} onSave={(s) => { setSettings(s); setIsSettingsOpen(false); }} onClose={() => setIsSettingsOpen(false)} onMigrate={() => setIsMigrationOpen(true)} />}
             {isMigrationOpen && <MigrationModal data={{ products, transactions, inventory }} onClose={() => setIsMigrationOpen(false)} />}
             {detailModal && <CellDetailModal row={detailModal.row} cell={detailModal.cell} onClose={() => setDetailModal(null)} onAiExplain={() => handleSendMessage("EXPLAIN_CELL")} isThinking={isThinking} />}
+
+            {/* Debug Overlay */}
+            {debugInfo && (
+                <div className="fixed top-4 left-1/2 -translate-x-1/2 bg-red-900/90 text-white p-4 rounded shadow-2xl z-[100] max-w-2xl border border-red-500 backdrop-blur-sm">
+                    <h4 className="font-bold flex items-center gap-2 mb-2"><i className="fa-solid fa-triangle-exclamation"></i> Data Load Issue</h4>
+                    <p className="text-sm mb-2">{debugInfo.error || "No data returned from Google Sheets."}</p>
+                    {debugInfo.logs && (
+                        <ul className="text-xs font-mono bg-black/30 p-2 rounded space-y-1">
+                            {debugInfo.logs.map((l: string, i: number) => <li key={i}>{l}</li>)}
+                        </ul>
+                    )}
+                    <button onClick={() => setDebugInfo(null)} className="mt-3 text-xs bg-white/10 hover:bg-white/20 px-3 py-1 rounded">Dismiss</button>
+                </div>
+            )}
         </div>
     );
 };

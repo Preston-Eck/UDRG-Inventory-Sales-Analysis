@@ -323,6 +323,33 @@ const App = () => {
     // Render Side Effects
     useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
+    // Saved Views State
+    const [savedViews, setSavedViews] = useState<{ name: string, filters: FilterState }[]>(() => {
+        const saved = localStorage.getItem('udrg_saved_views');
+        return saved ? JSON.parse(saved) : [];
+    });
+    const [newViewName, setNewViewName] = useState('');
+
+    const handleSaveView = () => {
+        if (!newViewName.trim()) return;
+        const newView = { name: newViewName, filters: draftFilters };
+        const updated = [...savedViews, newView];
+        setSavedViews(updated);
+        localStorage.setItem('udrg_saved_views', JSON.stringify(updated));
+        setNewViewName('');
+    };
+
+    const handleLoadView = (view: { name: string, filters: FilterState }) => {
+        setFilters(view.filters);
+        setDraftFilters(view.filters);
+    };
+
+    const handleDeleteView = (name: string) => {
+        const updated = savedViews.filter(v => v.name !== name);
+        setSavedViews(updated);
+        localStorage.setItem('udrg_saved_views', JSON.stringify(updated));
+    };
+
     return (
         <div className={`min-h-screen flex flex-col md:flex-row bg-[var(--app-bg)] text-[var(--text-color)] font-sans ${settings.fontSize}`}>
             <style>{`:root { --app-bg: ${settings.colors.background}; --sidebar-bg: ${settings.colors.sidebar}; --card-bg: ${settings.colors.card}; --primary-color: ${settings.colors.primary}; --text-color: ${settings.colors.text}; --text-muted: ${settings.colors.text}80; --border-color: ${settings.colors.border}; }`}</style>
@@ -330,12 +357,33 @@ const App = () => {
             {/* Sidebar */}
             <aside className="w-full md:w-64 bg-[var(--sidebar-bg)] border-r border-[var(--border-color)] flex flex-col h-screen flex-shrink-0 z-20">
                 <div className="p-4"><h1 className="text-xl font-bold text-[var(--primary-color)]"><i className="fa-solid fa-boxes-stacked"></i> UDRG Reports</h1></div>
-                <div className="px-4 mb-6 space-y-1">
+
+                {/* View Selection */}
+                <div className="px-4 mb-2 space-y-1">
                     <button onClick={() => setView('dashboard')} className={`w-full text-left px-3 py-2 rounded text-sm font-medium ${view === 'dashboard' ? 'bg-[var(--primary-color)] text-white' : 'text-[var(--text-muted)] hover:bg-[var(--app-bg)]'}`}><i className="fa-solid fa-chart-pie w-6"></i> Dashboard</button>
                     <button onClick={() => setView('calendar')} className={`w-full text-left px-3 py-2 rounded text-sm font-medium ${view === 'calendar' ? 'bg-[var(--primary-color)] text-white' : 'text-[var(--text-muted)] hover:bg-[var(--app-bg)]'}`}><i className="fa-solid fa-calendar-days w-6"></i> Forecast</button>
                 </div>
 
-                <div className="flex-1 overflow-y-auto px-4 space-y-6">
+                <div className="flex-1 overflow-y-auto px-4 space-y-6 custom-scrollbar">
+
+                    {/* Saved Views Section */}
+                    <div className="border-b border-[var(--border-color)] pb-4">
+                        <label className="text-xs font-semibold text-[var(--text-muted)] uppercase mb-2 block">Saved Views</label>
+                        <div className="space-y-1 mb-2">
+                            {savedViews.map(sv => (
+                                <div key={sv.name} className="flex justify-between items-center group">
+                                    <button onClick={() => handleLoadView(sv)} className="text-xs text-[var(--text-color)] hover:text-[#var(--primary-color)] truncate max-w-[120px]">{sv.name}</button>
+                                    <button onClick={() => handleDeleteView(sv.name)} className="text-[10px] text-red-500 opacity-0 group-hover:opacity-100 hover:text-red-400"><i className="fa-solid fa-trash"></i></button>
+                                </div>
+                            ))}
+                            {savedViews.length === 0 && <div className="text-[10px] text-[var(--text-muted)] italic">No saved views</div>}
+                        </div>
+                        <div className="flex gap-1">
+                            <input type="text" placeholder="View Name" value={newViewName} onChange={e => setNewViewName(e.target.value)} className="w-full text-[10px] bg-[var(--card-bg)] border border-[var(--border-color)] rounded px-1" />
+                            <button onClick={handleSaveView} disabled={!newViewName} className="text-[10px] bg-[var(--card-bg)] border border-[var(--border-color)] rounded px-2 hover:bg-[var(--primary-color)] hover:text-white disabled:opacity-50"><i className="fa-solid fa-save"></i></button>
+                        </div>
+                    </div>
+
                     <div className="bg-[var(--app-bg)] p-3 rounded border border-[var(--border-color)]">
                         <div className="flex justify-between items-center mb-2"><label className="text-xs font-semibold text-[var(--text-muted)] uppercase">Data Sync</label><div className={`w-2 h-2 rounded-full ${loading ? 'bg-amber-500 animate-pulse' : 'bg-green-500'}`}></div></div>
                         <button onClick={loadServerData} className="w-full bg-[var(--card-bg)] hover:bg-[var(--border-color)] text-xs py-1.5 rounded border border-[var(--border-color)] transition-colors"><i className="fa-solid fa-sync mr-1"></i> Refresh</button>

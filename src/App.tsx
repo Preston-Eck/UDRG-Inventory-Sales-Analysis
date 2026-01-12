@@ -4,6 +4,7 @@ import { supabase, checkSupabaseConnection } from './lib/supabaseClient';
 import { generateMockData, MOCK_PRODUCTS } from './utils/mockData';
 import { Button, Card, HeaderWithInfo } from './components/ui';
 import { SettingsModal, MigrationModal, CellDetailModal } from './components/modals';
+import { FilterPanel } from './components/FilterPanel';
 import { CalendarView } from './components/CalendarView';
 import { AppSettings, DEFAULT_SETTINGS, FilterState, AnalysisRow, Product, Transaction, InventoryState, CellLogic, ChatMessage } from './types';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend } from 'chart.js';
@@ -132,13 +133,15 @@ const App = () => {
         }
     };
 
-    const { availableProperties, availableDepartments, availableVendors } = useMemo(() => {
+    const { availableProperties, availableDepartments, availableVendors, availableCategories } = useMemo(() => {
         const props = new Set(transactions.map(t => t.property).filter(Boolean));
         const depts = new Set(products.map(p => p.department).filter(Boolean));
+        const cats = new Set(products.map(p => p.category).filter(Boolean));
         const vendors = new Set(products.map(p => p.vendor).filter(Boolean));
         return {
             availableProperties: Array.from(props).sort(),
             availableDepartments: Array.from(depts).sort(),
+            availableCategories: Array.from(cats).sort(),
             availableVendors: Array.from(vendors).sort()
         };
     }, [transactions, products]);
@@ -215,7 +218,12 @@ const App = () => {
         }
 
         return rows.filter(r => {
-            const matchSearch = r.name.toLowerCase().includes(filters.search.toLowerCase());
+            const searchLower = filters.search.toLowerCase();
+            const matchSearch = !searchLower ||
+                r.name.toLowerCase().includes(searchLower) ||
+                r.skus.some(s => s.toLowerCase().includes(searchLower)) ||
+                r.vendor.toLowerCase().includes(searchLower);
+
             const matchCat = filters.categories.length === 0 || filters.categories.includes(r.category);
             const matchDept = filters.departments.length === 0 || filters.departments.some(d => r.department.includes(d));
             const matchVendor = filters.vendors.length === 0 || filters.vendors.some(v => r.vendor.includes(v));
@@ -344,8 +352,10 @@ const App = () => {
 
                     <div>
                         <label className="text-xs font-semibold text-[var(--text-muted)] uppercase mb-2 block">Search</label>
-                        <input type="text" className="w-full bg-[var(--card-bg)] text-xs border border-[var(--border-color)] rounded p-2 outline-none" placeholder="Search..." value={filters.search} onChange={e => setFilters(p => ({ ...p, search: e.target.value }))} />
+                        <input type="text" className="w-full bg-[var(--card-bg)] text-xs border border-[var(--border-color)] rounded p-2 outline-none" placeholder="Search SKU, Name, Vendor..." value={filters.search} onChange={e => setFilters(p => ({ ...p, search: e.target.value }))} />
                     </div>
+
+                    <FilterPanel filters={filters} setFilters={setFilters} availableCategories={availableCategories} availableDepartments={availableDepartments} availableVendors={availableVendors} />
 
                     <div>
                         <label className="text-xs font-semibold text-[var(--text-muted)] uppercase mb-2 block">Period</label>

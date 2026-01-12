@@ -76,22 +76,19 @@ export interface AnalysisRow {
 
 export interface FilterState {
     search: string;
-    searchFields: string[];
     categories: string[];
     departments: string[];
     vendors: string[];
     dateStart: string;
     dateEnd: string;
-    groupBy: 'sku' | 'category' | 'custom';
     selectedProperty: string;
-    sortBy: keyof AnalysisRow | 'name' | 'revenue' | 'profit' | 'suggestedReorder';
+    sortBy: keyof AnalysisRow | 'suggestedReorder';
     sortDir: 'asc' | 'desc';
     showColumns: {
         sold: boolean;
         revenue: boolean;
         profit: boolean;
         onHand: boolean;
-        demand: boolean;
         reorder: boolean;
     };
 }

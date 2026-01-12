@@ -133,16 +133,22 @@ const App = () => {
         }
     };
 
-    const { availableProperties, availableDepartments, availableVendors, availableCategories } = useMemo(() => {
+    const { availableProperties, availableDepartments, availableVendors, availableCategories, diagnostics } = useMemo(() => {
         const props = new Set(transactions.map(t => t.property).filter(Boolean));
         const depts = new Set(products.map(p => p.department).filter(Boolean));
         const cats = new Set(products.map(p => p.category).filter(Boolean));
         const vendors = new Set(products.map(p => p.vendor).filter(Boolean));
+
+        // Data Health
+        const missingCost = products.filter(p => !p.cost || p.cost === 0).length;
+        const missingPrice = products.filter(p => !p.price || p.price === 0).length;
+
         return {
             availableProperties: Array.from(props).sort(),
             availableDepartments: Array.from(depts).sort(),
             availableCategories: Array.from(cats).sort(),
-            availableVendors: Array.from(vendors).sort()
+            availableVendors: Array.from(vendors).sort(),
+            diagnostics: { missingCost, missingPrice }
         };
     }, [transactions, products]);
 
@@ -425,7 +431,16 @@ const App = () => {
                 <header className="bg-[var(--sidebar-bg)] border-b border-[var(--border-color)] p-6 flex-shrink-0 flex justify-between items-center">
                     <div>
                         <h2 className="text-2xl font-bold">{view === 'dashboard' ? 'Performance Dashboard' : 'Restock Forecast'}</h2>
-                        <p className="text-[var(--text-muted)] text-sm">{view === 'dashboard' ? `${filters.dateStart} to ${filters.dateEnd} • ${filters.selectedProperty}` : 'Projection based on Seasonality'}</p>
+                        <p className="text-[var(--text-muted)] text-sm mb-1">{view === 'dashboard' ? `${filters.dateStart} to ${filters.dateEnd} • ${filters.selectedProperty}` : 'Projection based on Seasonality'}</p>
+
+                        {(diagnostics.missingCost > 0 || diagnostics.missingPrice > 0) && (
+                            <div className="text-[10px] bg-amber-500/10 text-amber-500 border border-amber-500/20 px-2 py-1 rounded inline-flex items-center gap-2">
+                                <i className="fa-solid fa-triangle-exclamation"></i>
+                                {diagnostics.missingCost > 0 && <span>{diagnostics.missingCost} items missing Cost.</span>}
+                                {diagnostics.missingPrice > 0 && <span>{diagnostics.missingPrice} items missing Price.</span>}
+                                <span>Profit/Revenue may be inaccurate.</span>
+                            </div>
+                        )}
                     </div>
                     <div className="flex gap-3">
                         {view === 'dashboard' && <Button onClick={handleRunForecast} variant="primary"><i className="fa-solid fa-wand-magic-sparkles mr-2"></i> Run Forecast</Button>}
@@ -437,15 +452,32 @@ const App = () => {
                         <Card className="h-full overflow-hidden flex flex-col p-0 bg-[var(--app-bg)]">
                             <div className="overflow-auto flex-1">
                                 <table className="w-full text-left border-collapse">
+                                    <div className="p-2 border-b border-[var(--border-color)] flex justify-end">
+                                        <div className="relative group">
+                                            <button className="text-xs bg-[var(--card-bg)] border border-[var(--border-color)] px-2 py-1 rounded hover:bg-[var(--primary-color)] hover:text-white transition-colors"><i className="fa-solid fa-table-columns mr-1"></i> Columns</button>
+                                            <div className="absolute right-0 top-full mt-1 w-40 bg-[var(--card-bg)] border border-[var(--border-color)] shadow-xl rounded p-2 hidden group-hover:block z-50">
+                                                {Object.keys(filters.showColumns).map(col => (
+                                                    <label key={col} className="flex items-center gap-2 text-xs p-1 hover:bg-[var(--app-bg)] cursor-pointer">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={filters.showColumns[col as keyof typeof filters.showColumns]}
+                                                            onChange={() => setFilters(p => ({ ...p, showColumns: { ...p.showColumns, [col]: !p.showColumns[col as keyof typeof filters.showColumns] } }))}
+                                                        />
+                                                        <span className="capitalize">{col}</span>
+                                                    </label>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
                                     <thead className="bg-[var(--sidebar-bg)] sticky top-0 z-10 text-xs uppercase font-semibold text-[var(--text-muted)]">
                                         <tr>
                                             <HeaderWithInfo label="Item Name" sortable onSort={() => handleSort('name')} currentSort={filters.sortBy === 'name'} currentDir={filters.sortDir} infoQuery="Product Name" />
                                             <HeaderWithInfo label="Category" infoQuery="Product Category" />
-                                            <HeaderWithInfo label="Sold" className="text-right" sortable onSort={() => handleSort('qtySold')} currentSort={filters.sortBy === 'productCost'} currentDir={filters.sortDir} infoQuery="Units Sold" />
-                                            <HeaderWithInfo label="Revenue" className="text-right" sortable onSort={() => handleSort('revenue')} currentSort={filters.sortBy === 'revenue'} currentDir={filters.sortDir} infoQuery="Net Revenue" />
-                                            <HeaderWithInfo label="Profit" className="text-right" sortable onSort={() => handleSort('profit')} currentSort={filters.sortBy === 'profit'} currentDir={filters.sortDir} infoQuery="Gross Profit" />
-                                            <HeaderWithInfo label="On Hand" className="text-right" infoQuery="Current Inventory" />
-                                            <HeaderWithInfo label="Restock?" className="text-right" sortable onSort={() => handleSort('suggestedReorder')} currentSort={filters.sortBy === 'suggestedReorder'} currentDir={filters.sortDir} infoQuery="Suggested Order" />
+                                            {filters.showColumns.sold && <HeaderWithInfo label="Sold" className="text-right" sortable onSort={() => handleSort('qtySold')} currentSort={filters.sortBy === 'qtySold'} currentDir={filters.sortDir} infoQuery="Units Sold" />}
+                                            {filters.showColumns.revenue && <HeaderWithInfo label="Revenue" className="text-right" sortable onSort={() => handleSort('revenue')} currentSort={filters.sortBy === 'revenue'} currentDir={filters.sortDir} infoQuery="Net Revenue" />}
+                                            {filters.showColumns.profit && <HeaderWithInfo label="Profit" className="text-right" sortable onSort={() => handleSort('profit')} currentSort={filters.sortBy === 'profit'} currentDir={filters.sortDir} infoQuery="Gross Profit" />}
+                                            {filters.showColumns.onHand && <HeaderWithInfo label="On Hand" className="text-right" infoQuery="Current Inventory" />}
+                                            {filters.showColumns.reorder && <HeaderWithInfo label="Restock?" className="text-right" sortable onSort={() => handleSort('suggestedReorder')} currentSort={filters.sortBy === 'suggestedReorder'} currentDir={filters.sortDir} infoQuery="Suggested Order" />}
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-[var(--border-color)] bg-[var(--card-bg)]">
@@ -453,11 +485,11 @@ const App = () => {
                                             <tr key={row.id} className="hover:bg-[var(--app-bg)]/50 transition-colors">
                                                 <td className="px-4 py-3 font-medium">{row.name}<div className="text-[10px] text-[var(--text-muted)]">{row.vendor}</div></td>
                                                 <td className="px-4 py-3"><span className="bg-[var(--app-bg)] px-2 py-0.5 rounded text-xs">{row.category}</span></td>
-                                                <td className="px-4 py-3 text-right font-mono">{row.qtySold}</td>
-                                                <td className="px-4 py-3 text-right font-mono text-blue-300">${row.revenue.toLocaleString()}</td>
-                                                <td className="px-4 py-3 text-right font-mono text-emerald-400 font-bold">${row.profit.toLocaleString()}</td>
-                                                <td className="px-4 py-3 text-right font-mono">{row.qtyOnHand}</td>
-                                                <td className="px-4 py-3 text-right">{row.suggestedReorder > 0 ? <span className="bg-red-900/30 text-red-400 border border-red-900/50 px-2 py-0.5 rounded text-xs font-bold">+{Math.ceil(row.suggestedReorder)}</span> : <span className="text-slate-600">-</span>}</td>
+                                                {filters.showColumns.sold && <td className="px-4 py-3 text-right font-mono">{row.qtySold}</td>}
+                                                {filters.showColumns.revenue && <td className="px-4 py-3 text-right font-mono text-blue-300">${row.revenue.toLocaleString()}</td>}
+                                                {filters.showColumns.profit && <td className="px-4 py-3 text-right font-mono text-emerald-400 font-bold">${row.profit.toLocaleString()}</td>}
+                                                {filters.showColumns.onHand && <td className="px-4 py-3 text-right font-mono">{row.qtyOnHand}</td>}
+                                                {filters.showColumns.reorder && <td className="px-4 py-3 text-right">{row.suggestedReorder > 0 ? <span className="bg-red-900/30 text-red-400 border border-red-900/50 px-2 py-0.5 rounded text-xs font-bold">+{Math.ceil(row.suggestedReorder)}</span> : <span className="text-slate-600">-</span>}</td>}
                                             </tr>
                                         ))}
                                     </tbody>

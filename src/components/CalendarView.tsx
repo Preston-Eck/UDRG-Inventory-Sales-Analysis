@@ -70,7 +70,7 @@ export const CalendarView = ({ rows, onCellClick, sortConfig, onSort }: {
                             <tr key={row.id} className="hover:bg-[var(--app-bg)]/50 transition-colors group">
                                 <td className="px-4 py-2 sticky left-0 bg-[var(--card-bg)] group-hover:bg-[var(--app-bg)]/50 border-r border-[var(--border-color)] z-10">
                                     <div className="font-medium text-sm text-[var(--text-color)] truncate max-w-[200px]">{row.name}</div>
-                                    <div className="text-[10px] text-[var(--text-muted)]">{row.sku}</div>
+                                    <div className="text-[10px] text-[var(--text-muted)]">{row.skus.join(', ')}</div>
                                 </td>
                                 <td className="px-4 py-2 text-right font-mono text-xs border-r border-[var(--border-color)] text-slate-300 bg-[var(--app-bg)]/20">{row.qtyOnHand}</td>
                                 {row.calendarSchedule.map((cell, i) => (

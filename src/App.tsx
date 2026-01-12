@@ -191,7 +191,11 @@ const App = () => {
             rows = products.map(p => calculateMetrics([p.sku], p.sku, p.name, p.category, false));
         } else if (filters.groupBy === 'category') {
             const cats = Array.from(new Set(products.map(p => p.category)));
-            rows = cats.map(c => calculateMetrics(products.filter(p => p.category === c).map(p => p.sku), c, `Category: ${c}`, c, true));
+            rows = cats.map((c: string) => {
+                const catProducts = products.filter(p => p.category === c);
+                const catSkus = catProducts.map(p => p.sku);
+                return calculateMetrics(catSkus, c, `Category: ${c}`, c, true);
+            });
         } else if (filters.groupBy === 'custom') {
             rows = customGroups.map(g => calculateMetrics(g.skus, g.id, g.name, 'Custom Group', true));
             const groupedSkus = new Set(customGroups.flatMap(g => g.skus));

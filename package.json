@@ -9,15 +9,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
-<<<<<<< HEAD
     "@supabase/supabase-js": "^2.90.1",
-=======
-    "csv-parser": "^3.2.0",
-    "firebase": "^12.7.0",
-    "firebase-admin": "^13.6.0",
->>>>>>> 08b4bc2d0b6a860dc7634b97c2261bfb0cf7e831
-    "react": "^19.2.3",
-    "react-dom": "^19.2.3"
+    "chart.js": "^4.4.1",
+    "react": "^18.2.0",
+    "react-chartjs-2": "^5.2.0",
+    "react-dom": "^18.2.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

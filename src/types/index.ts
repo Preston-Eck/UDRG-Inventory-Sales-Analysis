@@ -86,8 +86,9 @@ export interface FilterState {
     vendors: string[];
     dateStart: string;
     dateEnd: string;
-    selectedProperty: string;
-    sortBy: keyof AnalysisRow | 'suggestedReorder';
+    groupBy: 'sku' | 'category' | 'custom';
+    selectedProperty: string[];
+    sortBy: 'qtySold' | 'revenue' | 'profit' | 'qtyOnHand' | 'name';
     sortDir: 'asc' | 'desc';
     showColumns: {
         sold: boolean;

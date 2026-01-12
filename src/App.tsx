@@ -5,6 +5,7 @@ import { generateMockData, MOCK_PRODUCTS } from './utils/mockData';
 import { Button, Card, HeaderWithInfo } from './components/ui';
 import { SettingsModal, MigrationModal, CellDetailModal } from './components/modals';
 import { FilterPanel } from './components/FilterPanel';
+import { TransactionEditModal } from './components/TransactionEditModal';
 import { OutlierReview } from './components/OutlierReview';
 import { AppSettings, DEFAULT_SETTINGS, FilterState, AnalysisRow, Product, Transaction, InventoryState, CellLogic, ChatMessage } from './types';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend } from 'chart.js';
@@ -33,10 +34,12 @@ const App = () => {
         dateStart: '2023-01-01',
         dateEnd: new Date().toISOString().split('T')[0],
         groupBy: 'sku',
-        selectedProperty: 'All',
+        selectedProperty: [],
         sortBy: 'revenue',
         sortDir: 'desc',
-        showColumns: { sold: true, grossRevenue: false, discounts: false, revenue: true, profit: true, onHand: true, reorder: true }
+        showColumns: { sold: true, grossRevenue: false, discounts: false, revenue: true, profit: true, onHand: true, reorder: true },
+        hideZeroSales: false,
+        hideZeroOnHand: false
     });
 
     const [draftFilters, setDraftFilters] = useState(filters);
@@ -63,9 +66,28 @@ const App = () => {
 
     // Outlier Review State
     const [isOutlierReviewOpen, setIsOutlierReviewOpen] = useState(false);
+    const [isMissingCostModalOpen, setIsMissingCostModalOpen] = useState(false);
+    const [selectedRowDetail, setSelectedRowDetail] = useState<AnalysisRow | null>(null);
+    const [editingTransactionId, setEditingTransactionId] = useState<string | null>(null);
 
     const handleUpdateTransaction = (id: string, updates: Partial<Transaction>) => {
         setTransactions(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
+        // Update in Supabase
+        supabase.from('transactions').update(updates).eq('id', id).then(({ error }) => {
+            if (error) console.error('Failed to update transaction:', error);
+        });
+    };
+
+    const handleDeleteTransaction = async (id: string) => {
+        if (!confirm('Are you sure you want to delete this transaction? This cannot be undone.')) return;
+
+        setTransactions(prev => prev.filter(t => t.id !== id));
+        // Delete from Supabase
+        const { error } = await supabase.from('transactions').delete().eq('id', id);
+        if (error) {
+            console.error('Failed to delete transaction:', error);
+            alert('Failed to delete transaction from database');
+        }
     };
 
     const outlierCount = useMemo(() => {
@@ -81,6 +103,7 @@ const App = () => {
     // Pagination for Dashboard Table
     const [dashboardPage, setDashboardPage] = useState(1);
     const dashboardItemsPerPage = 50;
+    const [loadingProgress, setLoadingProgress] = useState<string>('');
 
     useEffect(() => {
         const today = new Date();
@@ -96,6 +119,110 @@ const App = () => {
         loadServerData();
     }, []);
 
+    // Cache configuration
+    const CACHE_DURATION = 60 * 60 * 1000; // 1 hour
+    const CACHE_KEYS = {
+        products: 'udrg_products_cache',
+        inventory: 'udrg_inventory_cache',
+        transactions: 'udrg_transactions_cache',
+        timestamp: 'udrg_cache_timestamp'
+    };
+
+    const getCachedData = (key: string) => {
+        try {
+            const timestamp = localStorage.getItem(CACHE_KEYS.timestamp);
+            if (timestamp && Date.now() - parseInt(timestamp) < CACHE_DURATION) {
+                const cached = localStorage.getItem(key);
+                return cached ? JSON.parse(cached) : null;
+            }
+        } catch (e) {
+            console.warn('Cache read error:', e);
+        }
+        return null;
+    };
+
+    const setCachedData = (key: string, data: any) => {
+        try {
+            localStorage.setItem(key, JSON.stringify(data));
+            localStorage.setItem(CACHE_KEYS.timestamp, Date.now().toString());
+        } catch (e) {
+            console.warn('Cache write error:', e);
+        }
+    };
+
+    // Transaction Editing State
+    const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
+    const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+
+    const handleUpdateProduct = async (updatedProduct: Product) => {
+        // Optimistic UI Update
+        setProducts(prev => prev.map(p => p.sku === updatedProduct.sku ? updatedProduct : p));
+
+        // Supabase Update
+        try {
+            const { error } = await supabase
+                .from('products')
+                .update({
+                    name: updatedProduct.name,
+                    department: updatedProduct.department,
+                    category: updatedProduct.category,
+                    vendor: updatedProduct.vendor,
+                    price: updatedProduct.price
+                })
+                .eq('sku', updatedProduct.sku);
+
+            if (error) throw error;
+        } catch (e) {
+            console.error("Failed to update product:", e);
+            alert("Failed to update product database.");
+        }
+    };
+
+    const handleSaveEdit = async (updatedTx: Transaction, updatedProd: Product) => {
+        // 1. Update Product (if changed)
+        // We always call this to ensure consistency if the user edited product fields
+        await handleUpdateProduct(updatedProd);
+
+        // 2. Update Transaction
+        setTransactions(prev => prev.map(t => t.id === updatedTx.id ? updatedTx : t));
+
+        try {
+            const { error } = await supabase
+                .from('transactions')
+                .update({
+                    date: updatedTx.date,
+                    qty_sold: updatedTx.qtySold,
+                    discount: updatedTx.discount,
+                    property: updatedTx.property,
+                    unit_price_sold: updatedTx.unit_price_sold
+                })
+                .eq('id', updatedTx.id);
+
+            if (error) throw error;
+        } catch (e) {
+            console.error("Failed to update transaction:", e);
+            alert("Failed to update transaction database.");
+        }
+    };
+
+    const handleInitiateEdit = (tx: Transaction) => {
+        const product = products.find(p => p.sku === tx.sku);
+        if (product) {
+            setEditingTransaction(tx);
+            setEditingProduct(product);
+        } else {
+            alert("Could not infer product for this transaction.");
+        }
+    };
+
+    const handleForceRefresh = () => {
+        localStorage.removeItem(CACHE_KEYS.products);
+        localStorage.removeItem(CACHE_KEYS.inventory);
+        localStorage.removeItem(CACHE_KEYS.transactions);
+        localStorage.removeItem(CACHE_KEYS.timestamp);
+        window.location.reload();
+    };
+
     const loadServerData = async () => {
         setLoading(true);
         setDebugInfo(null);
@@ -103,19 +230,32 @@ const App = () => {
         try {
             const conn = await checkSupabaseConnection();
             if (conn.success && (conn.count || 0) > 0) {
-                console.log("Supabase has data. Fetching full dataset in batches...");
+                // Check cache first
+                const cachedProducts = getCachedData(CACHE_KEYS.products);
+                const cachedInventory = getCachedData(CACHE_KEYS.inventory);
+                const cachedTransactions = getCachedData(CACHE_KEYS.transactions);
 
-                const fetchAll = async (table: string) => {
+                if (cachedProducts && cachedInventory && cachedTransactions) {
+                    console.log("✓ Loading from cache...");
+                    setProducts(cachedProducts);
+                    setInventory(cachedInventory);
+                    setTransactions(cachedTransactions);
+                    setLoading(false);
+                    return;
+                }
+
+                console.log("Cache miss. Fetching from Supabase...");
+
+                const fetchAll = async (table: string, onProgress?: (current: number, total: number) => void) => {
                     let allData: any[] = [];
-                    let lastId = 0;
-                    let hasMore = true;
                     let page = 0;
-                    const batchSize = 1000;
+                    const batchSize = 1000; // Match Supabase limit to ensure pagination works
+                    let hasMore = true;
 
                     while (hasMore) {
-                        const { data, error } = await supabase
+                        const { data, error, count } = await supabase
                             .from(table)
-                            .select('*')
+                            .select('*', { count: 'exact' })
                             .range(page * batchSize, (page + 1) * batchSize - 1);
 
                         if (error) throw error;
@@ -123,6 +263,9 @@ const App = () => {
                             hasMore = false;
                         } else {
                             allData = [...allData, ...data];
+                            if (onProgress && count) {
+                                onProgress(allData.length, count);
+                            }
                             if (data.length < batchSize) hasMore = false;
                             page++;
                         }
@@ -130,21 +273,31 @@ const App = () => {
                     return allData;
                 };
 
-                const [resProducts, resInventory, resTransactions] = await Promise.all([
-                    fetchAll('products'),
-                    fetchAll('inventory'),
-                    fetchAll('transactions')
-                ]);
-
+                // Progressive loading: small datasets first
+                setLoadingProgress('Loading products...');
+                const resProducts = await fetchAll('products');
                 const sbProducts: Product[] = resProducts.map(p => ({
                     sku: p.sku, name: p.name, department: p.department || '', category: p.category, vendor: p.vendor || '', cost: Number(p.cost) || 0, price: Number(p.price) || 0
                 }));
+                setProducts(sbProducts);
+                setCachedData(CACHE_KEYS.products, sbProducts);
+
+                setLoadingProgress('Loading inventory...');
+                const resInventory = await fetchAll('inventory');
                 const sbInventory: InventoryState[] = resInventory.map(i => ({
                     sku: i.sku,
                     qtyOnHand: Number(i.qty_on_hand) || 0,
                     property: i.property,
                     lastCounted: i.last_counted
                 }));
+                setInventory(sbInventory);
+                setCachedData(CACHE_KEYS.inventory, sbInventory);
+
+                // Load transactions last with progress
+                setLoadingProgress('Loading transactions...');
+                const resTransactions = await fetchAll('transactions', (current, total) => {
+                    setLoadingProgress(`Loading transactions... ${current.toLocaleString()} / ${total.toLocaleString()}`);
+                });
                 const sbTransactions: Transaction[] = resTransactions.map(t => ({
                     id: t.id || Math.random().toString(),
                     date: t.date,
@@ -156,8 +309,11 @@ const App = () => {
                     unit_cost_sold: Number(t.unit_cost_sold) || 0,
                     review_status: t.review_status || 'pending'
                 }));
+                setTransactions(sbTransactions);
+                setCachedData(CACHE_KEYS.transactions, sbTransactions);
 
-                setProducts(sbProducts); setInventory(sbInventory); setTransactions(sbTransactions);
+                setLoadingProgress('');
+                console.log(`✓ Loaded ${sbProducts.length} products, ${sbInventory.length} inventory, ${sbTransactions.length} transactions`);
                 setLoading(false); return;
             }
         } catch (e) { console.warn("Supabase Fetch Failed, falling back", e); }
@@ -188,14 +344,41 @@ const App = () => {
     };
 
     const { availableProperties, availableDepartments, availableVendors, availableCategories, diagnostics } = useMemo(() => {
-        const props = new Set(transactions.map(t => t.property).filter(Boolean));
-        const depts = new Set(products.map(p => p.department).filter(Boolean));
-        const cats = new Set(products.map(p => p.category).filter(Boolean));
-        const vendors = new Set(products.map(p => p.vendor).filter(Boolean));
+        // 1. Base Filter: Date Range (used to determine available Properties)
+        // 1. Base Filter: Date Range (used to determine available Properties)
+        const dateFilteredTx = transactions.filter(t => {
+            const txDate = t.date.split('T')[0]; // Normalize to YYYY-MM-DD
+            const match = txDate >= filters.dateStart && txDate <= filters.dateEnd;
+            // if (!match) console.log(`Filtered out: ${txDate} not in ${filters.dateStart}-${filters.dateEnd}`);
+            return match;
+        });
+
+        // 2. Secondary Filter: Selected Properties (used to determine Depts, Cats, Vendors)
+        // If no property selected, use all date-filtered transactions
+        console.log("Filtering by Properties:", filters.selectedProperty);
+        const storeFilteredTx = dateFilteredTx.filter(t =>
+            filters.selectedProperty.length === 0 || filters.selectedProperty.some(p => p.trim() === (t.property || '').trim())
+        );
+
+        // Get SKUs present in the store-filtered subset
+        const activeSkus = new Set(storeFilteredTx.map(t => t.sku));
+
+        // Get products matching those SKUs
+        const activeProducts = products.filter(p => activeSkus.has(p.sku));
+
+        // Available Properties are derived from the wider Date-Filtered set (so you can see other stores to switch to)
+        const props = new Set(dateFilteredTx.map(t => t.property).filter(Boolean));
+
+        // Other filters are derived from the narrower Store-Filtered set
+        const depts = new Set(activeProducts.map(p => p.department).filter(Boolean));
+        const cats = new Set(activeProducts.map(p => p.category).filter(Boolean));
+        const vendors = new Set(activeProducts.map(p => p.vendor).filter(Boolean));
 
         // Data Health
-        const missingCost = products.filter(p => !p.cost || p.cost === 0).length;
-        const missingPrice = products.filter(p => !p.price || p.price === 0).length;
+        const missingCost = activeProducts.filter(p => !p.cost || p.cost === 0).length;
+        const missingPrice = activeProducts.filter(p => !p.price || p.price === 0).length;
+
+        console.log(`Cascading Filters: DateTx=${dateFilteredTx.length}, StoreTx=${storeFilteredTx.length}, Products=${activeProducts.length}`);
 
         return {
             availableProperties: Array.from(props).sort(),
@@ -204,14 +387,16 @@ const App = () => {
             availableVendors: Array.from(vendors).sort(),
             diagnostics: { missingCost, missingPrice }
         };
-    }, [transactions, products]);
+    }, [transactions, products, filters.dateStart, filters.dateEnd, filters.selectedProperty]);
 
     // Data Analysis Logic
     const analyzedData: AnalysisRow[] = useMemo(() => {
         // Pre-filter transactions
         const filteredTx = transactions.filter(t => {
-            const d = t.date;
-            return d >= filters.dateStart && d <= filters.dateEnd && (filters.selectedProperty === 'All' || t.property === filters.selectedProperty);
+            const txDate = t.date.split('T')[0];
+            const matchDate = txDate >= filters.dateStart && txDate <= filters.dateEnd;
+            const matchProp = filters.selectedProperty.length === 0 || filters.selectedProperty.some(p => p.trim() === (t.property || '').trim());
+            return matchDate && matchProp;
         });
 
         // Grouping Maps
@@ -236,13 +421,18 @@ const App = () => {
                 productCost += p.cost;
 
                 // Aggregate Inventory Based on Filter
-                if (filters.selectedProperty === 'All') {
+                if (filters.selectedProperty.length === 0) {
                     const skuInv = invIndex.get(sku);
                     if (skuInv) {
                         skuInv.forEach(qty => qtyOnHand += qty);
                     }
                 } else {
-                    qtyOnHand += (invIndex.get(sku)?.get(filters.selectedProperty) || 0);
+                    const skuInv = invIndex.get(sku);
+                    if (skuInv) {
+                        filters.selectedProperty.forEach(prop => {
+                            qtyOnHand += (skuInv.get(prop) || 0);
+                        });
+                    }
                 }
 
                 const txs = txBySku.get(sku) || [];
@@ -303,7 +493,10 @@ const App = () => {
             const matchCat = filters.categories.length === 0 || filters.categories.includes(r.category);
             const matchDept = filters.departments.length === 0 || filters.departments.some(d => r.department.includes(d));
             const matchVendor = filters.vendors.length === 0 || filters.vendors.some(v => r.vendor.includes(v));
-            return matchSearch && matchCat && matchDept && matchVendor;
+            const matchZeroSales = !filters.hideZeroSales || r.qtySold > 0;
+            const matchZeroOnHand = !filters.hideZeroOnHand || r.qtyOnHand > 0;
+
+            return matchSearch && matchCat && matchDept && matchVendor && matchZeroSales && matchZeroOnHand;
         }).sort((a, b) => {
             const field = filters.sortBy; const dir = filters.sortDir === 'asc' ? 1 : -1;
             const valA = a[field as keyof AnalysisRow]; const valB = b[field as keyof AnalysisRow];
@@ -312,6 +505,53 @@ const App = () => {
             return (valA - valB) * dir;
         });
     }, [products, transactions, inventory, customGroups, filters]);
+
+
+    const missingCostSkus = useMemo(() => {
+        const skusInView = new Set<string>();
+        analyzedData.forEach(row => {
+            if (row.skus) {
+                row.skus.forEach(sku => skusInView.add(sku));
+            } else {
+                skusInView.add(row.id);
+            }
+        });
+
+        return products
+            .filter(p => skusInView.has(p.sku) && (!p.cost || p.cost === 0))
+            .map(p => ({
+                sku: p.sku,
+                name: p.name,
+                price: p.price,
+                category: p.category,
+                vendor: p.vendor
+            }));
+    }, [analyzedData, products]);
+
+    const downloadMissingCostSkus = () => {
+        const content = missingCostSkus.map(p => `${p.sku}\t${p.name}\t${p.category}\t${p.vendor}\t$${p.price}`).join('\n');
+        const header = 'SKU\tProduct Name\tCategory\tVendor\tPrice\n';
+        const blob = new Blob([header + content], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `missing_cost_skus_${new Date().toISOString().split('T')[0]}.txt`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
+    // Get transactions for a specific row
+    const getRowTransactions = (row: AnalysisRow) => {
+        const skus = row.skus || [row.id];
+        return transactions.filter(t => {
+            const matchesSku = skus.includes(t.sku);
+            const txDate = t.date.split('T')[0];
+            const matchDate = txDate >= filters.dateStart && txDate <= filters.dateEnd;
+            const matchProp = filters.selectedProperty.length === 0 || filters.selectedProperty.some(p => p.trim() === (t.property || '').trim());
+            return matchesSku && matchDate && matchProp;
+        }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    };
+
 
     const handleApplyFilters = () => setFilters(draftFilters);
     const handleSort = (field: string) => setFilters(p => ({ ...p, sortBy: field as any, sortDir: p.sortBy === field && p.sortDir === 'desc' ? 'asc' : 'desc' }));
@@ -471,20 +711,7 @@ const App = () => {
                             <span className="font-bold"><i className="fa-solid fa-stethoscope mr-2"></i> Data Health</span>
                             {outlierCount > 0 && <span className="bg-amber-500 text-black px-1.5 rounded-full text-[10px] font-bold">{outlierCount}</span>}
                         </button>
-
-                        <label className="text-xs font-semibold text-[var(--text-muted)] uppercase mb-2 block">Store</label>
-                        <select value={filters.selectedProperty} onChange={e => setFilters(p => ({ ...p, selectedProperty: e.target.value }))} className="w-full bg-[var(--card-bg)] text-xs border border-[var(--border-color)] rounded p-2 outline-none">
-                            <option value="All">All Locations</option>
-                            {availableProperties.map(p => <option key={p} value={p}>{p}</option>)}
-                        </select>
                     </div>
-
-                    <div>
-                        <label className="text-xs font-semibold text-[var(--text-muted)] uppercase mb-2 block">Search</label>
-                        <input type="text" className="w-full bg-[var(--card-bg)] text-xs border border-[var(--border-color)] rounded p-2 outline-none" placeholder="Search SKU, Name, Vendor..." value={filters.search} onChange={e => setFilters(p => ({ ...p, search: e.target.value }))} />
-                    </div>
-
-                    <FilterPanel filters={filters} setFilters={setFilters} availableCategories={availableCategories} availableDepartments={availableDepartments} availableVendors={availableVendors} />
 
                     <div>
                         <label className="text-xs font-semibold text-[var(--text-muted)] uppercase mb-2 block">Period</label>
@@ -494,6 +721,15 @@ const App = () => {
                             <input type="date" value={filters.dateEnd} onChange={e => setFilters(p => ({ ...p, dateEnd: e.target.value }))} className="w-full bg-[var(--card-bg)] text-[10px] border border-[var(--border-color)] rounded p-1" />
                         </div>
                     </div>
+
+                    <div>
+                        <label className="text-xs font-semibold text-[var(--text-muted)] uppercase mb-2 block">Search</label>
+                        <input type="text" className="w-full bg-[var(--card-bg)] text-xs border border-[var(--border-color)] rounded p-2 outline-none" placeholder="Search SKU, Name, Vendor..." value={filters.search} onChange={e => setFilters(p => ({ ...p, search: e.target.value }))} />
+                    </div>
+
+                    <FilterPanel filters={filters} setFilters={setFilters} availableCategories={availableCategories} availableDepartments={availableDepartments} availableVendors={availableVendors} availableProperties={availableProperties} />
+
+
 
                     <div className="pt-2 border-t border-[var(--border-color)]">
                         <button onClick={() => setIsSettingsOpen(true)} className="w-full flex items-center gap-2 px-3 py-2 rounded text-sm text-[var(--text-muted)] hover:bg-[var(--app-bg)]"><i className="fa-solid fa-gear"></i> Settings</button>
@@ -508,6 +744,13 @@ const App = () => {
                         <h2 className="text-2xl font-bold">{view === 'dashboard' ? 'Performance Dashboard' : 'Restock Forecast'}</h2>
                         <p className="text-[var(--text-muted)] text-sm mb-1">{view === 'dashboard' ? `${filters.dateStart} to ${filters.dateEnd} • ${filters.selectedProperty}` : 'Projection based on Seasonality'}</p>
 
+                        {loadingProgress && (
+                            <div className="text-xs bg-blue-500/10 text-blue-400 border border-blue-500/20 px-3 py-1.5 rounded inline-flex items-center gap-2 animate-pulse">
+                                <i className="fa-solid fa-spinner fa-spin"></i>
+                                <span>{loadingProgress}</span>
+                            </div>
+                        )}
+
                         {(diagnostics.missingCost > 0 || diagnostics.missingPrice > 0) && (
                             <div className="text-[10px] bg-amber-500/10 text-amber-500 border border-amber-500/20 px-2 py-1 rounded inline-flex items-center gap-2">
                                 <i className="fa-solid fa-triangle-exclamation"></i>
@@ -518,6 +761,10 @@ const App = () => {
                         )}
                     </div>
                     <div className="flex gap-3">
+                        <Button onClick={handleForceRefresh} variant="secondary" title="Force Reload from Server">
+                            <i className={`fa-solid fa-rotate-right ${loading ? 'fa-spin' : ''} mr-2`}></i>
+                            Refresh Data
+                        </Button>
                         {view === 'dashboard' && <Button onClick={handleRunForecast} variant="primary"><i className="fa-solid fa-wand-magic-sparkles mr-2"></i> Run Forecast</Button>}
                     </div>
                 </header>
@@ -551,12 +798,37 @@ const App = () => {
                                     </>
                                 )}
                             </div>
+                            <button
+                                onClick={() => setFilters(p => ({ ...p, hideZeroSales: !p.hideZeroSales }))}
+                                className={`ml-2 text-xs border px-2 py-1 rounded transition-colors flex items-center gap-2 ${filters.hideZeroSales ? 'bg-[var(--primary-color)] text-white border-[var(--primary-color)]' : 'bg-[var(--card-bg)] border-[var(--border-color)] hover:bg-[var(--primary-color)] hover:text-white'}`}
+                            >
+                                <i className={`fa-solid ${filters.hideZeroSales ? 'fa-toggle-on' : 'fa-toggle-off'}`}></i>
+                                Hide Zero Sales
+                            </button>
+                            <button
+                                onClick={() => setFilters(p => ({ ...p, hideZeroOnHand: !p.hideZeroOnHand }))}
+                                className={`ml-2 text-xs border px-2 py-1 rounded transition-colors flex items-center gap-2 ${filters.hideZeroOnHand ? 'bg-[var(--primary-color)] text-white border-[var(--primary-color)]' : 'bg-[var(--card-bg)] border-[var(--border-color)] hover:bg-[var(--primary-color)] hover:text-white'}`}
+                            >
+                                <i className={`fa-solid ${filters.hideZeroOnHand ? 'fa-toggle-on' : 'fa-toggle-off'}`}></i>
+                                Hide Zero On Hand
+                            </button>
                         </div>
 
                         {/* Summary Bar */}
                         <div className="bg-[var(--app-bg)] border-b-2 border-[var(--primary-color)] p-3">
                             <div className="flex items-center justify-between">
-                                <div className="text-xs font-semibold text-[var(--text-muted)] uppercase">Filtered Totals:</div>
+                                <div className="flex items-center gap-3">
+                                    <div className="text-xs font-semibold text-[var(--text-muted)] uppercase">Filtered Totals:</div>
+                                    {missingCostSkus.length > 0 && (
+                                        <button
+                                            onClick={() => setIsMissingCostModalOpen(true)}
+                                            className="text-xs bg-amber-500/10 text-amber-400 border border-amber-500/30 px-2 py-1 rounded hover:bg-amber-500/20 transition-colors"
+                                        >
+                                            <i className="fa-solid fa-triangle-exclamation mr-1"></i>
+                                            {missingCostSkus.length} Missing Cost
+                                        </button>
+                                    )}
+                                </div>
                                 <div className="flex gap-6 text-sm">
                                     <div className="flex flex-col items-end">
                                         <span className="text-[10px] text-[var(--text-muted)] uppercase">Qty Sold</span>
@@ -588,9 +860,16 @@ const App = () => {
                                             const skus = row.skus || [row.id];
                                             const inventoryCost = skus.reduce((skuSum, sku) => {
                                                 const product = products.find(p => p.sku === sku);
-                                                const qty = filters.selectedProperty === 'All'
-                                                    ? inventory.filter(i => i.sku === sku).reduce((total, i) => total + i.qtyOnHand, 0)
-                                                    : inventory.find(i => i.sku === sku && i.property === filters.selectedProperty)?.qtyOnHand || 0;
+                                                let qty = 0;
+                                                if (filters.selectedProperty.length === 0) {
+                                                    const skuInv = inventory.filter(i => i.sku === sku);
+                                                    skuInv.forEach(i => qty += i.qtyOnHand);
+                                                } else {
+                                                    filters.selectedProperty.forEach(prop => {
+                                                        const i = inventory.find(inv => inv.sku === sku && inv.property === prop);
+                                                        if (i) qty += i.qtyOnHand;
+                                                    });
+                                                }
                                                 return skuSum + (qty * (product?.cost || 0));
                                             }, 0);
                                             return sum + inventoryCost;
@@ -617,7 +896,11 @@ const App = () => {
                                 </thead>
                                 <tbody className="divide-y divide-[var(--border-color)] bg-[var(--card-bg)]">
                                     {paginatedDashboardRows.map(row => (
-                                        <tr key={row.id} className="hover:bg-[var(--app-bg)]/50 transition-colors">
+                                        <tr
+                                            key={row.id}
+                                            onClick={() => setSelectedRowDetail(row)}
+                                            className="hover:bg-[var(--app-bg)]/50 transition-colors cursor-pointer"
+                                        >
                                             <td className="px-4 py-3 font-medium">{row.name}<div className="text-[10px] text-[var(--text-muted)]">{row.vendor}</div></td>
                                             <td className="px-4 py-3"><span className="bg-[var(--app-bg)] px-2 py-0.5 rounded text-xs">{row.category}</span></td>
                                             {filters.showColumns.sold && <td className="px-4 py-3 text-right font-mono">{row.qtySold}</td>}
@@ -677,6 +960,228 @@ const App = () => {
                     )}
                     <button onClick={() => setDebugInfo(null)} className="mt-3 text-xs bg-white/10 hover:bg-white/20 px-3 py-1 rounded">Dismiss</button>
                 </div>
+            )}
+
+            {/* Missing Cost SKU Modal */}
+            {isMissingCostModalOpen && (
+                <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+                    <div className="bg-[var(--card-bg)] border border-[var(--border-color)] rounded-lg shadow-2xl max-w-4xl w-full max-h-[80vh] flex flex-col">
+                        <div className="p-4 border-b border-[var(--border-color)] flex justify-between items-center">
+                            <h3 className="text-lg font-bold flex items-center gap-2">
+                                <i className="fa-solid fa-triangle-exclamation text-amber-400"></i>
+                                Missing Cost SKUs ({missingCostSkus.length})
+                            </h3>
+                            <button onClick={() => setIsMissingCostModalOpen(false)} className="text-[var(--text-muted)] hover:text-white">
+                                <i className="fa-solid fa-times"></i>
+                            </button>
+                        </div>
+                        <div className="p-4 flex-1 overflow-auto">
+                            <p className="text-sm text-[var(--text-muted)] mb-4">
+                                The following SKUs in your filtered view have a cost of $0. Update these in your POS to ensure accurate profit calculations.
+                            </p>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm">
+                                    <thead className="bg-[var(--sidebar-bg)] sticky top-0">
+                                        <tr className="text-left text-xs uppercase text-[var(--text-muted)]">
+                                            <th className="px-3 py-2">SKU</th>
+                                            <th className="px-3 py-2">Product Name</th>
+                                            <th className="px-3 py-2">Category</th>
+                                            <th className="px-3 py-2">Vendor</th>
+                                            <th className="px-3 py-2 text-right">Price</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-[var(--border-color)]">
+                                        {missingCostSkus.map(p => (
+                                            <tr key={p.sku} className="hover:bg-[var(--app-bg)]/50">
+                                                <td className="px-3 py-2 font-mono text-xs">{p.sku}</td>
+                                                <td className="px-3 py-2">{p.name}</td>
+                                                <td className="px-3 py-2 text-xs">{p.category}</td>
+                                                <td className="px-3 py-2 text-xs">{p.vendor}</td>
+                                                <td className="px-3 py-2 text-right font-mono">${p.price.toFixed(2)}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div className="p-4 border-t border-[var(--border-color)] flex justify-between items-center">
+                            <span className="text-sm text-[var(--text-muted)]">{missingCostSkus.length} SKUs with missing cost</span>
+                            <div className="flex gap-2">
+                                <Button variant="secondary" onClick={() => setIsMissingCostModalOpen(false)}>Close</Button>
+                                <Button variant="primary" onClick={downloadMissingCostSkus}>
+                                    <i className="fa-solid fa-download mr-2"></i>
+                                    Download .txt
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Row Detail Modal */}
+            {selectedRowDetail && (
+                <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+                    <div className="bg-[var(--card-bg)] border border-[var(--border-color)] rounded-lg shadow-2xl max-w-6xl w-full max-h-[90vh] flex flex-col">
+                        <div className="p-4 border-b border-[var(--border-color)] flex justify-between items-center">
+                            <div>
+                                <h3 className="text-xl font-bold">{selectedRowDetail.name}</h3>
+                                <p className="text-sm text-[var(--text-muted)]">{selectedRowDetail.vendor} • {selectedRowDetail.category}</p>
+                            </div>
+                            <button onClick={() => setSelectedRowDetail(null)} className="text-[var(--text-muted)] hover:text-white">
+                                <i className="fa-solid fa-times text-xl"></i>
+                            </button>
+                        </div>
+
+                        <div className="p-6 flex-1 overflow-auto">
+                            {/* Product Details & Metrics */}
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                                {/* Product Info */}
+                                <div className="bg-[var(--app-bg)] p-4 rounded border border-[var(--border-color)]">
+                                    <h4 className="text-xs uppercase text-[var(--text-muted)] mb-3 font-semibold">Product Details</h4>
+                                    <div className="space-y-2 text-sm">
+                                        <div className="flex justify-between">
+                                            <span className="text-[var(--text-muted)]">SKU(s):</span>
+                                            <span className="font-mono text-xs">{selectedRowDetail.skus.join(', ')}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span className="text-[var(--text-muted)]">Department:</span>
+                                            <span>{selectedRowDetail.department}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span className="text-[var(--text-muted)]">Cost:</span>
+                                            <span className="font-mono">${(selectedRowDetail.profit / selectedRowDetail.qtySold || 0).toFixed(2)}</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Sales Metrics */}
+                                <div className="bg-[var(--app-bg)] p-4 rounded border border-[var(--border-color)]">
+                                    <h4 className="text-xs uppercase text-[var(--text-muted)] mb-3 font-semibold">Sales Performance</h4>
+                                    <div className="space-y-2 text-sm">
+                                        <div className="flex justify-between">
+                                            <span className="text-[var(--text-muted)]">Qty Sold:</span>
+                                            <span className="font-mono font-bold">{selectedRowDetail.qtySold}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span className="text-[var(--text-muted)]">Gross Revenue:</span>
+                                            <span className="font-mono text-sky-300">${selectedRowDetail.grossRevenue.toLocaleString()}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span className="text-[var(--text-muted)]">Discounts:</span>
+                                            <span className="font-mono text-orange-400">-${selectedRowDetail.discounts.toLocaleString()}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span className="text-[var(--text-muted)]">Net Revenue:</span>
+                                            <span className="font-mono text-blue-300">${selectedRowDetail.revenue.toLocaleString()}</span>
+                                        </div>
+                                        <div className="flex justify-between border-t border-[var(--border-color)] pt-2">
+                                            <span className="text-[var(--text-muted)] font-semibold">Profit:</span>
+                                            <span className="font-mono text-emerald-400 font-bold">${selectedRowDetail.profit.toLocaleString()}</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Inventory Status */}
+                                <div className="bg-[var(--app-bg)] p-4 rounded border border-[var(--border-color)]">
+                                    <h4 className="text-xs uppercase text-[var(--text-muted)] mb-3 font-semibold">Inventory Status</h4>
+                                    <div className="space-y-2 text-sm">
+                                        <div className="flex justify-between">
+                                            <span className="text-[var(--text-muted)]">On Hand:</span>
+                                            <span className="font-mono font-bold">{selectedRowDetail.qtyOnHand}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span className="text-[var(--text-muted)]">Avg Monthly Demand:</span>
+                                            <span className="font-mono">{selectedRowDetail.avgMonthlyDemand.toFixed(1)}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span className="text-[var(--text-muted)]">Months of Supply:</span>
+                                            <span className="font-mono">{selectedRowDetail.monthsOfSupply.toFixed(1)}</span>
+                                        </div>
+                                        {selectedRowDetail.suggestedReorder > 0 && (
+                                            <div className="flex justify-between border-t border-[var(--border-color)] pt-2">
+                                                <span className="text-[var(--text-muted)] font-semibold">Restock Needed:</span>
+                                                <span className="font-mono text-red-400 font-bold">+{Math.ceil(selectedRowDetail.suggestedReorder)}</span>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Transaction History */}
+                            <div className="bg-[var(--app-bg)] p-4 rounded border border-[var(--border-color)]">
+                                <h4 className="text-xs uppercase text-[var(--text-muted)] mb-3 font-semibold">
+                                    Transaction History ({getRowTransactions(selectedRowDetail).length} transactions)
+                                </h4>
+                                <div className="overflow-x-auto max-h-96">
+                                    <table className="w-full text-sm">
+                                        <thead className="bg-[var(--sidebar-bg)] sticky top-0 text-xs uppercase text-[var(--text-muted)]">
+                                            <tr>
+                                                <th className="px-3 py-2 text-left">Date</th>
+                                                <th className="px-3 py-2 text-left">Property</th>
+                                                <th className="px-3 py-2 text-left">SKU</th>
+                                                <th className="px-3 py-2 text-right">Qty</th>
+                                                <th className="px-3 py-2 text-right">Unit Price</th>
+                                                <th className="px-3 py-2 text-right">Discount</th>
+                                                <th className="px-3 py-2 text-right">Revenue</th>
+                                                <th className="px-3 py-2 text-right">Profit</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-[var(--border-color)]">
+                                            {getRowTransactions(selectedRowDetail).map((t, idx) => {
+                                                const product = products.find(p => p.sku === t.sku);
+                                                const unitCost = t.unit_cost_sold || product?.cost || 0;
+                                                const unitPrice = t.unit_price_sold || product?.price || 0;
+                                                const revenue = (t.qtySold * unitPrice) - t.discount;
+                                                const profit = revenue - (t.qtySold * unitCost);
+
+                                                return (
+                                                    <tr key={t.id || idx} className="hover:bg-[var(--sidebar-bg)]/30 group">
+                                                        <td className="px-3 py-2 font-mono text-xs">{t.date}</td>
+                                                        <td className="px-3 py-2 text-xs">{t.property}</td>
+                                                        <td className="px-3 py-2 font-mono text-xs">{t.sku}</td>
+                                                        <td className="px-3 py-2 text-right font-mono text-xs">{t.qtySold}</td>
+                                                        <td className="px-3 py-2 text-right font-mono text-xs">${unitPrice.toFixed(2)}</td>
+                                                        <td className="px-3 py-2 text-right font-mono text-xs text-orange-400">-${t.discount}</td>
+                                                        <td className="px-3 py-2 text-right font-mono text-xs font-bold text-blue-300">${revenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                                        <td className="px-3 py-2 text-right font-mono text-xs font-bold text-emerald-400">${profit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                                        <td className="px-3 py-2 text-right">
+                                                            <button
+                                                                onClick={() => handleInitiateEdit(t)}
+                                                                className="text-[var(--text-muted)] hover:text-[var(--primary-color)] transition-colors opacity-0 group-hover:opacity-100"
+                                                                title="Edit Transaction & Product Details"
+                                                            >
+                                                                <i className="fa-solid fa-pen-to-square"></i>
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="p-4 border-t border-[var(--border-color)] flex justify-end">
+                            <Button variant="secondary" onClick={() => setSelectedRowDetail(null)}>Close</Button>
+                        </div>
+                    </div >
+                </div >
+            )}
+            {/* Transaction/Product Edit Modal */}
+            {editingTransaction && editingProduct && (
+                <TransactionEditModal
+                    isOpen={true}
+                    onClose={() => { setEditingTransaction(null); setEditingProduct(null); }}
+                    transaction={editingTransaction}
+                    product={editingProduct}
+                    availableProperties={availableProperties}
+                    availableDepartments={availableDepartments}
+                    availableCategories={availableCategories}
+                    availableVendors={availableVendors}
+                    onSave={handleSaveEdit}
+                    onDelete={handleDeleteTransaction}
+                />
             )}
         </div>
     );

@@ -8,16 +8,17 @@ interface FilterPanelProps {
     availableCategories: string[];
     availableDepartments: string[];
     availableVendors: string[];
+    availableProperties: string[];
 }
 
-export const FilterPanel: React.FC<FilterPanelProps> = ({ filters, setFilters, availableCategories, availableDepartments, availableVendors }) => {
+export const FilterPanel: React.FC<FilterPanelProps> = ({ filters, setFilters, availableCategories, availableDepartments, availableVendors, availableProperties }) => {
     const [expandedSection, setExpandedSection] = useState<string | null>(null);
 
     const toggleSection = (section: string) => {
         setExpandedSection(expandedSection === section ? null : section);
     };
 
-    const toggleFilter = (type: 'categories' | 'departments' | 'vendors', value: string) => {
+    const toggleFilter = (type: 'categories' | 'departments' | 'vendors' | 'selectedProperty', value: string) => {
         setFilters(prev => {
             const current = prev[type];
             const newValues = current.includes(value)
@@ -27,11 +28,11 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({ filters, setFilters, a
         });
     };
 
-    const clearFilter = (type: 'categories' | 'departments' | 'vendors') => {
+    const clearFilter = (type: 'categories' | 'departments' | 'vendors' | 'selectedProperty') => {
         setFilters(prev => ({ ...prev, [type]: [] }));
     };
 
-    const renderMultiSelect = (title: string, type: 'categories' | 'departments' | 'vendors', options: string[]) => {
+    const renderMultiSelect = (title: string, type: 'categories' | 'departments' | 'vendors' | 'selectedProperty', options: string[]) => {
         const selected = filters[type];
         const isExpanded = expandedSection === type;
         const [searchTerm, setSearchTerm] = useState('');
@@ -91,6 +92,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({ filters, setFilters, a
 
     return (
         <div className="space-y-1">
+            {renderMultiSelect('Stores', 'selectedProperty', availableProperties)}
             {renderMultiSelect('Departments', 'departments', availableDepartments)}
             {renderMultiSelect('Categories', 'categories', availableCategories)}
             {renderMultiSelect('Vendors', 'vendors', availableVendors)}
